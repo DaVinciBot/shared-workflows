@@ -53,7 +53,7 @@ jobs:
     env:
       IMAGE_NAME: ${{ inputs.image_name != '' && inputs.image_name || format('ghcr.io/{0}/{1}', github.repository_owner, github.event.repository.name) }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           submodules: recursive
 
