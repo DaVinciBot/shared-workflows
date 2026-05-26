@@ -7,7 +7,7 @@ Application repositories should call these workflows by tag:
 ```yaml
 jobs:
   ci:
-    uses: DaVinciBot/shared-workflows/.github/workflows/ci.yml@v1
+    uses: DaVinciBot/shared-workflows/.github/workflows/ci.yml@v1.0.0
 ```
 
 Required repository or organization setup:
