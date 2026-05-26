@@ -1,0 +1,72 @@
+name: Shared Deploy
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: Target environment name.
+        required: true
+        type: string
+      image_ref:
+        description: Image reference to deploy, preferably an immutable digest.
+        required: true
+        type: string
+      allow_missing_webhook:
+        description: Skip deployment when the webhook secret is absent.
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      webhook_url:
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy ${{ inputs.environment }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: ${{ inputs.environment }}
+    steps:
+      - name: Check Dokploy webhook
+        id: webhook
+        env:
+          WEBHOOK_URL: ${{ secrets.webhook_url }}
+          ALLOW_MISSING_WEBHOOK: ${{ inputs.allow_missing_webhook }}
+        run: |
+          if [ -z "$WEBHOOK_URL" ]; then
+            if [ "$ALLOW_MISSING_WEBHOOK" = "true" ]; then
+              echo "::notice::Dokploy webhook is not configured; skipping deployment."
+              echo "enabled=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+
+            echo "::error::Dokploy webhook secret is not configured."
+            exit 1
+          fi
+
+          echo "enabled=true" >> "$GITHUB_OUTPUT"
+
+      - name: Trigger Dokploy deploy
+        if: steps.webhook.outputs.enabled == 'true'
+        env:
+          WEBHOOK_URL: ${{ secrets.webhook_url }}
+          TARGET_ENVIRONMENT: ${{ inputs.environment }}
+          IMAGE_REF: ${{ inputs.image_ref }}
+          REPOSITORY: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          payload="$(jq -n \
+            --arg environment "$TARGET_ENVIRONMENT" \
+            --arg image_ref "$IMAGE_REF" \
+            --arg repository "$REPOSITORY" \
+            --arg sha "$SHA" \
+            '{environment: $environment, image_ref: $image_ref, repository: $repository, sha: $sha}')"
+
+          curl -fsS \
+            -X POST \
+            -H "Content-Type: application/json" \
+            -d "$payload" \
+            "$WEBHOOK_URL"

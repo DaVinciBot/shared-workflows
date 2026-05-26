@@ -1,0 +1,61 @@
+name: Shared E2E
+
+on:
+  workflow_call:
+    inputs:
+      pnpm_version:
+        description: pnpm version to install.
+        required: false
+        type: string
+        default: "10.33.0"
+      node_version_file:
+        description: Node version file path.
+        required: false
+        type: string
+        default: .nvmrc
+      e2e_command:
+        description: E2E command.
+        required: false
+        type: string
+        default: pnpm test:e2e
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    name: E2E Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ inputs.pnpm_version }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: ${{ inputs.node_version_file }}
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright browsers
+        run: pnpm exec playwright install --with-deps
+
+      - name: Run e2e tests
+        run: ${{ inputs.e2e_command }}
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          if-no-files-found: ignore

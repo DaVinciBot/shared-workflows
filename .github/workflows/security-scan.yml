@@ -1,0 +1,71 @@
+name: Shared Security Scan
+
+on:
+  workflow_call:
+    inputs:
+      fs_gate_severity:
+        description: Severity gate for repository vulnerability scan.
+        required: false
+        type: string
+        default: CRITICAL
+      dependency_review_severity:
+        description: Severity gate for dependency review.
+        required: false
+        type: string
+        default: high
+
+permissions:
+  contents: read
+  pull-requests: read
+  security-events: write
+
+jobs:
+  dependency-review:
+    name: Dependency Review
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/dependency-review-action@v4
+        with:
+          fail-on-severity: ${{ inputs.dependency_review_severity }}
+
+  trivy-fs:
+    name: Trivy FS
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Scan repository
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln,secret,misconfig
+          format: sarif
+          output: trivy-fs.sarif
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "0"
+
+      - name: Upload SARIF
+        if: always()
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-fs.sarif
+
+      - name: Gate repository vulnerabilities
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln
+          format: table
+          vuln-type: os,library
+          severity: ${{ inputs.fs_gate_severity }}
+          ignore-unfixed: true
+          exit-code: "1"
