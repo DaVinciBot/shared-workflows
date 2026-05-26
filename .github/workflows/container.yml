@@ -12,7 +12,7 @@ on:
         description: Full image name. Defaults to ghcr.io/<owner>/<repo>.
         required: false
         type: string
-        default: ""
+        default: ''
       context:
         description: Docker build context.
         required: false
@@ -126,7 +126,7 @@ jobs:
           vuln-type: os,library
           severity: ${{ inputs.trivy_severity }}
           ignore-unfixed: true
-          exit-code: "1"
+          exit-code: '1'
 
       - name: Generate image SBOM
         if: inputs.push && steps.build.outputs.digest != ''
