@@ -43,7 +43,7 @@ jobs:
         with:
           version: ${{ inputs.pnpm_version }}
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version-file: ${{ inputs.node_version_file }}
           cache: pnpm
