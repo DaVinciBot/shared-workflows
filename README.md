@@ -7,7 +7,7 @@ Application repositories should call these workflows by tag:
 ```yaml
 jobs:
   ci:
-    uses: DaVinciBot/shared-workflows/.github/workflows/ci.yml@v1.2.1
+    uses: DaVinciBot/shared-workflows/.github/workflows/ci.yml@v2.0.0
 ```
 
 Required repository or organization setup:
@@ -16,8 +16,11 @@ Required repository or organization setup:
 - Create and maintain the `v1` tag after changes are reviewed.
 - Grant GitHub Actions `packages: write` for GHCR publishing.
 - Grant GitHub Actions `id-token: write` for keyless Cosign signatures.
-- Configure deployment environments `dev`, `staging`, and `prod` in application repositories.
-- Configure Dokploy webhook secrets in application repositories:
-  - `DOKPLOY_WEBHOOK_DEV`
-  - `DOKPLOY_WEBHOOK_STAGING`
-  - `DOKPLOY_WEBHOOK_PROD`
+- Configure deployment environments `dev`, `staging`, and `prod` in application repositories,
+  with a required reviewer on `prod`.
+- Configure repository secrets (shared across environments):
+  - `DOKPLOY_URL`
+  - `DOKPLOY_API_KEY`
+  - `GHCR_TOKEN` (PAT with `read:packages`, used by Dokploy to pull from GHCR)
+- Configure environment secrets (one per environment: `dev`, `staging`, `prod`):
+  - `DOKPLOY_APP_ID`

@@ -8,17 +8,27 @@ on:
         required: true
         type: string
       image_ref:
-        description: Image reference to deploy, preferably an immutable digest.
+        description: Image reference to deploy, as image@sha256:digest.
         required: true
         type: string
-      allow_missing_webhook:
-        description: Skip deployment when the webhook secret is absent.
+      health_url:
+        description: URL polled after deploy to confirm the app is healthy.
+        required: true
+        type: string
+      allow_missing_config:
+        description: Skip deployment when Dokploy is not configured for this environment.
         required: false
         type: boolean
         default: false
     secrets:
-      webhook_url:
-        required: false
+      DOKPLOY_URL:
+        required: true
+      DOKPLOY_API_KEY:
+        required: true
+      DOKPLOY_APP_ID:
+        required: true
+      GHCR_TOKEN:
+        required: true
 
 permissions:
   contents: read
@@ -27,46 +37,82 @@ jobs:
   deploy:
     name: Deploy ${{ inputs.environment }}
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     environment: ${{ inputs.environment }}
     steps:
-      - name: Check Dokploy webhook
-        id: webhook
+      - name: Check Dokploy configuration
+        id: config
         env:
-          WEBHOOK_URL: ${{ secrets.webhook_url }}
-          ALLOW_MISSING_WEBHOOK: ${{ inputs.allow_missing_webhook }}
+          DOKPLOY_APP_ID: ${{ secrets.DOKPLOY_APP_ID }}
+          ALLOW_MISSING_CONFIG: ${{ inputs.allow_missing_config }}
         run: |
-          if [ -z "$WEBHOOK_URL" ]; then
-            if [ "$ALLOW_MISSING_WEBHOOK" = "true" ]; then
-              echo "::notice::Dokploy webhook is not configured; skipping deployment."
+          if [ -z "$DOKPLOY_APP_ID" ]; then
+            if [ "$ALLOW_MISSING_CONFIG" = "true" ]; then
+              echo "::notice::Dokploy is not configured for ${{ inputs.environment }}; skipping deployment."
               echo "enabled=false" >> "$GITHUB_OUTPUT"
               exit 0
             fi
 
-            echo "::error::Dokploy webhook secret is not configured."
+            echo "::error::DOKPLOY_APP_ID is not configured for environment ${{ inputs.environment }}."
             exit 1
           fi
 
           echo "enabled=true" >> "$GITHUB_OUTPUT"
 
-      - name: Trigger Dokploy deploy
-        if: steps.webhook.outputs.enabled == 'true'
+      - name: Pin image digest
+        if: steps.config.outputs.enabled == 'true'
         env:
-          WEBHOOK_URL: ${{ secrets.webhook_url }}
-          TARGET_ENVIRONMENT: ${{ inputs.environment }}
+          DOKPLOY_URL: ${{ secrets.DOKPLOY_URL }}
+          DOKPLOY_API_KEY: ${{ secrets.DOKPLOY_API_KEY }}
+          DOKPLOY_APP_ID: ${{ secrets.DOKPLOY_APP_ID }}
+          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
+          GHCR_USER: ${{ github.actor }}
           IMAGE_REF: ${{ inputs.image_ref }}
-          REPOSITORY: ${{ github.repository }}
-          SHA: ${{ github.sha }}
         run: |
           payload="$(jq -n \
-            --arg environment "$TARGET_ENVIRONMENT" \
-            --arg image_ref "$IMAGE_REF" \
-            --arg repository "$REPOSITORY" \
-            --arg sha "$SHA" \
-            '{environment: $environment, image_ref: $image_ref, repository: $repository, sha: $sha}')"
+            --arg appId "$DOKPLOY_APP_ID" \
+            --arg image "$IMAGE_REF" \
+            --arg user "$GHCR_USER" \
+            --arg pass "$GHCR_TOKEN" \
+            '{applicationId: $appId, dockerImage: $image, username: $user, password: $pass, registryUrl: "ghcr.io"}')"
 
           curl -fsS \
             -X POST \
+            -H "x-api-key: $DOKPLOY_API_KEY" \
             -H "Content-Type: application/json" \
             -d "$payload" \
-            "$WEBHOOK_URL"
+            "$DOKPLOY_URL/api/application.saveDockerProvider"
+
+      - name: Trigger deployment
+        if: steps.config.outputs.enabled == 'true'
+        env:
+          DOKPLOY_URL: ${{ secrets.DOKPLOY_URL }}
+          DOKPLOY_API_KEY: ${{ secrets.DOKPLOY_API_KEY }}
+          DOKPLOY_APP_ID: ${{ secrets.DOKPLOY_APP_ID }}
+        run: |
+          payload="$(jq -n --arg appId "$DOKPLOY_APP_ID" '{applicationId: $appId}')"
+
+          curl -fsS \
+            -X POST \
+            -H "x-api-key: $DOKPLOY_API_KEY" \
+            -H "Content-Type: application/json" \
+            -d "$payload" \
+            "$DOKPLOY_URL/api/application.deploy"
+
+      - name: Wait for health check
+        if: steps.config.outputs.enabled == 'true'
+        env:
+          HEALTH_URL: ${{ inputs.health_url }}
+        run: |
+          for attempt in $(seq 1 30); do
+            status="$(curl -s -o /dev/null -w '%{http_code}' "$HEALTH_URL" || echo 000)"
+            if [ "$status" = "200" ]; then
+              echo "Healthy after $attempt attempt(s)."
+              exit 0
+            fi
+            echo "Attempt $attempt/30: $HEALTH_URL returned $status, retrying in 10s..."
+            sleep 10
+          done
+
+          echo "::error::$HEALTH_URL did not return 200 within 5 minutes."
+          exit 1
