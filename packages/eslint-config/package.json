@@ -1,0 +1,20 @@
+{
+	"name": "@davincibot/eslint-config",
+	"version": "1.0.0",
+	"description": "Shared ESLint config for DaVinciBot SvelteKit apps",
+	"type": "module",
+	"exports": "./index.js",
+	"peerDependencies": {
+		"@eslint/js": ">=10",
+		"eslint": ">=10",
+		"eslint-config-prettier": ">=9",
+		"eslint-plugin-svelte": ">=3",
+		"globals": ">=15",
+		"typescript-eslint": ">=8"
+	},
+	"publishConfig": {
+		"registry": "https://npm.pkg.github.com",
+		"access": "restricted"
+	},
+	"license": "UNLICENSED"
+}

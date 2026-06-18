@@ -1,0 +1,12 @@
+{
+	"name": "@davincibot/prettier-config",
+	"version": "1.0.0",
+	"description": "Shared Prettier config for DaVinciBot SvelteKit apps",
+	"main": "index.json",
+	"exports": "./index.json",
+	"publishConfig": {
+		"registry": "https://npm.pkg.github.com",
+		"access": "restricted"
+	},
+	"license": "UNLICENSED"
+}

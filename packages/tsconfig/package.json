@@ -1,0 +1,13 @@
+{
+	"name": "@davincibot/tsconfig",
+	"version": "1.0.0",
+	"description": "Shared TypeScript config for DaVinciBot SvelteKit apps",
+	"exports": {
+		"./sveltekit": "./sveltekit.json"
+	},
+	"publishConfig": {
+		"registry": "https://npm.pkg.github.com",
+		"access": "restricted"
+	},
+	"license": "UNLICENSED"
+}
