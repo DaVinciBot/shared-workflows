@@ -3,7 +3,13 @@
 	"version": "1.0.0",
 	"description": "Shared ESLint config for DaVinciBot SvelteKit apps",
 	"type": "module",
-	"exports": "./index.js",
+	"types": "./index.d.ts",
+	"exports": {
+		".": {
+			"types": "./index.d.ts",
+			"import": "./index.js"
+		}
+	},
 	"peerDependencies": {
 		"@eslint/js": ">=10",
 		"eslint": ">=10",
@@ -11,6 +17,9 @@
 		"eslint-plugin-svelte": ">=3",
 		"globals": ">=15",
 		"typescript-eslint": ">=8"
+	},
+	"devDependencies": {
+		"eslint": ">=10"
 	},
 	"publishConfig": {
 		"access": "public"
