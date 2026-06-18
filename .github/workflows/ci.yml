@@ -59,13 +59,9 @@ jobs:
         with:
           node-version-file: ${{ inputs.node_version_file }}
           cache: pnpm
-          registry-url: https://npm.pkg.github.com
-          scope: '@davincibot'
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Run ${{ matrix.name }}
         run: ${{ matrix.command }}

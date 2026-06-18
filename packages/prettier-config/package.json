@@ -5,8 +5,7 @@
 	"main": "index.json",
 	"exports": "./index.json",
 	"publishConfig": {
-		"registry": "https://npm.pkg.github.com",
-		"access": "restricted"
+		"access": "public"
 	},
 	"license": "UNLICENSED"
 }
