@@ -1,6 +1,6 @@
 {
 	"name": "@davincibot/eslint-config",
-	"version": "1.0.0",
+	"version": "1.0.1",
 	"description": "Shared ESLint config for DaVinciBot SvelteKit apps",
 	"type": "module",
 	"types": "./index.d.ts",
