@@ -23,7 +23,6 @@ on:
 
 permissions:
   contents: read
-  packages: read
 
 jobs:
   quality-gates:
