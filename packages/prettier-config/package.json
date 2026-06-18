@@ -4,6 +4,11 @@
 	"description": "Shared Prettier config for DaVinciBot SvelteKit apps",
 	"main": "index.json",
 	"exports": "./index.json",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/DaVinciBot/shared-workflows",
+		"directory": "packages/prettier-config"
+	},
 	"publishConfig": {
 		"access": "public"
 	},

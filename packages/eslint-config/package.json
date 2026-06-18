@@ -21,6 +21,11 @@
 	"devDependencies": {
 		"eslint": ">=10"
 	},
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/DaVinciBot/shared-workflows",
+		"directory": "packages/eslint-config"
+	},
 	"publishConfig": {
 		"access": "public"
 	},
