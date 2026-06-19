@@ -65,9 +65,20 @@ jobs:
         if: steps.config.outputs.enabled == 'true'
         env:
           IMAGE_REF: ${{ inputs.image_ref }}
-          DEFAULT_IMAGE_REF: ghcr.io/${{ github.repository }}:${{ inputs.environment }}
+          REPOSITORY: ${{ github.repository }}
+          ENVIRONMENT: ${{ inputs.environment }}
         run: |
-          ref="${IMAGE_REF:-${DEFAULT_IMAGE_REF,,}}"
+          if [ -n "$IMAGE_REF" ]; then
+            ref="$IMAGE_REF"
+          else
+            # No explicit ref: map environment to the image tag pushed by container.yml.
+            # prod is served from the default branch (main); other envs match their branch name.
+            case "$ENVIRONMENT" in
+              prod) tag="main" ;;
+              *) tag="$ENVIRONMENT" ;;
+            esac
+            ref="ghcr.io/${REPOSITORY,,}:${tag}"
+          fi
           echo "ref=$ref" >> "$GITHUB_OUTPUT"
           echo "Deploying image: $ref"
 
