@@ -8,9 +8,10 @@ on:
         required: true
         type: string
       image_ref:
-        description: Image reference to deploy, as image@sha256:digest.
-        required: true
+        description: Image reference to deploy, as image@sha256:digest. Defaults to ghcr.io/<repo>:<environment>.
+        required: false
         type: string
+        default: ''
       health_url:
         description: URL polled after deploy to confirm the app is healthy.
         required: true
@@ -59,6 +60,17 @@ jobs:
 
           echo "enabled=true" >> "$GITHUB_OUTPUT"
 
+      - name: Resolve image reference
+        id: image
+        if: steps.config.outputs.enabled == 'true'
+        env:
+          IMAGE_REF: ${{ inputs.image_ref }}
+          DEFAULT_IMAGE_REF: ghcr.io/${{ github.repository }}:${{ inputs.environment }}
+        run: |
+          ref="${IMAGE_REF:-$DEFAULT_IMAGE_REF}"
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+          echo "Deploying image: $ref"
+
       - name: Pin image digest
         if: steps.config.outputs.enabled == 'true'
         env:
@@ -67,7 +79,7 @@ jobs:
           DOKPLOY_APP_ID: ${{ secrets.DOKPLOY_APP_ID }}
           GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
           GHCR_USER: ${{ github.actor }}
-          IMAGE_REF: ${{ inputs.image_ref }}
+          IMAGE_REF: ${{ steps.image.outputs.ref }}
         run: |
           payload="$(jq -n \
             --arg appId "$DOKPLOY_APP_ID" \
