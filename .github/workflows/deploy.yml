@@ -67,7 +67,7 @@ jobs:
           IMAGE_REF: ${{ inputs.image_ref }}
           DEFAULT_IMAGE_REF: ghcr.io/${{ github.repository }}:${{ inputs.environment }}
         run: |
-          ref="${IMAGE_REF:-$DEFAULT_IMAGE_REF}"
+          ref="${IMAGE_REF:-${DEFAULT_IMAGE_REF,,}}"
           echo "ref=$ref" >> "$GITHUB_OUTPUT"
           echo "Deploying image: $ref"
 
