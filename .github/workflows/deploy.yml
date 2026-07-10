@@ -7,8 +7,8 @@ on:
         description: Target environment name.
         required: true
         type: string
-      image_ref:
-        description: Image reference to deploy, as image@sha256:digest. Defaults to ghcr.io/<repo>:<environment>.
+      image_name:
+        description: Image name without tag, e.g. ghcr.io/davincibot/admin. Defaults to ghcr.io/<repo>.
         required: false
         type: string
         default: ''
@@ -16,19 +16,10 @@ on:
         description: URL polled after deploy to confirm the app is healthy.
         required: true
         type: string
-      allow_missing_config:
-        description: Skip deployment when Dokploy is not configured for this environment.
-        required: false
-        type: boolean
-        default: false
     secrets:
-      DOKPLOY_URL:
+      WATCHTOWER_URL:
         required: true
-      DOKPLOY_API_KEY:
-        required: true
-      DOKPLOY_APP_ID:
-        required: true
-      GHCR_TOKEN:
+      WATCHTOWER_TOKEN:
         required: true
 
 permissions:
@@ -41,92 +32,46 @@ jobs:
     timeout-minutes: 15
     environment: ${{ inputs.environment }}
     steps:
-      - name: Check Dokploy configuration
-        id: config
-        env:
-          DOKPLOY_APP_ID: ${{ secrets.DOKPLOY_APP_ID }}
-          ALLOW_MISSING_CONFIG: ${{ inputs.allow_missing_config }}
-        run: |
-          if [ -z "$DOKPLOY_APP_ID" ]; then
-            if [ "$ALLOW_MISSING_CONFIG" = "true" ]; then
-              echo "::notice::Dokploy is not configured for ${{ inputs.environment }}; skipping deployment."
-              echo "enabled=false" >> "$GITHUB_OUTPUT"
-              exit 0
-            fi
-
-            echo "::error::DOKPLOY_APP_ID is not configured for environment ${{ inputs.environment }}."
-            exit 1
-          fi
-
-          echo "enabled=true" >> "$GITHUB_OUTPUT"
-
       - name: Resolve image reference
         id: image
-        if: steps.config.outputs.enabled == 'true'
         env:
-          IMAGE_REF: ${{ inputs.image_ref }}
+          IMAGE_NAME: ${{ inputs.image_name }}
           REPOSITORY: ${{ github.repository }}
           ENVIRONMENT: ${{ inputs.environment }}
         run: |
-          if [ -n "$IMAGE_REF" ]; then
-            ref="$IMAGE_REF"
-          else
-            # No explicit ref: map environment to the image tag pushed by container.yml.
-            # prod is served from the default branch (main); other envs match their branch name.
-            case "$ENVIRONMENT" in
-              prod) tag="main" ;;
-              *) tag="$ENVIRONMENT" ;;
-            esac
-            ref="ghcr.io/${REPOSITORY,,}:${tag}"
+          name="$IMAGE_NAME"
+          if [ -z "$name" ]; then
+            name="ghcr.io/${REPOSITORY,,}"
           fi
-          echo "ref=$ref" >> "$GITHUB_OUTPUT"
-          echo "Deploying image: $ref"
+          case "$ENVIRONMENT" in
+            prod) tag="main" ;;
+            *) tag="$ENVIRONMENT" ;;
+          esac
+          echo "ref=${name}:${tag}" >> "$GITHUB_OUTPUT"
+          echo "Triggering update for: ${name}:${tag}"
 
-      - name: Pin image digest
-        if: steps.config.outputs.enabled == 'true'
+      - name: Trigger Watchtower update
         env:
-          DOKPLOY_URL: ${{ secrets.DOKPLOY_URL }}
-          DOKPLOY_API_KEY: ${{ secrets.DOKPLOY_API_KEY }}
-          DOKPLOY_APP_ID: ${{ secrets.DOKPLOY_APP_ID }}
-          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
-          GHCR_USER: ${{ github.actor }}
+          WATCHTOWER_URL: ${{ secrets.WATCHTOWER_URL }}
+          WATCHTOWER_TOKEN: ${{ secrets.WATCHTOWER_TOKEN }}
           IMAGE_REF: ${{ steps.image.outputs.ref }}
         run: |
-          payload="$(jq -n \
-            --arg appId "$DOKPLOY_APP_ID" \
-            --arg image "$IMAGE_REF" \
-            --arg user "$GHCR_USER" \
-            --arg pass "$GHCR_TOKEN" \
-            '{applicationId: $appId, dockerImage: $image, username: $user, password: $pass, registryUrl: "ghcr.io"}')"
+          response="$(curl -fsS -X POST \
+            -H "Authorization: Bearer $WATCHTOWER_TOKEN" \
+            "$WATCHTOWER_URL/v1/update?image=$IMAGE_REF")"
+          echo "$response" | jq .
 
-          curl -fsS \
-            -X POST \
-            -H "x-api-key: $DOKPLOY_API_KEY" \
-            -H "Content-Type: application/json" \
-            -d "$payload" \
-            "$DOKPLOY_URL/api/application.saveDockerProvider"
-
-      - name: Trigger deployment
-        if: steps.config.outputs.enabled == 'true'
-        env:
-          DOKPLOY_URL: ${{ secrets.DOKPLOY_URL }}
-          DOKPLOY_API_KEY: ${{ secrets.DOKPLOY_API_KEY }}
-          DOKPLOY_APP_ID: ${{ secrets.DOKPLOY_APP_ID }}
-        run: |
-          payload="$(jq -n --arg appId "$DOKPLOY_APP_ID" '{applicationId: $appId}')"
-
-          curl -fsS \
-            -X POST \
-            -H "x-api-key: $DOKPLOY_API_KEY" \
-            -H "Content-Type: application/json" \
-            -d "$payload" \
-            "$DOKPLOY_URL/api/application.deploy"
+          failed="$(echo "$response" | jq -r '.summary.failed // 0')"
+          if [ "$failed" != "0" ]; then
+            echo "::error::Watchtower reported $failed failed update(s)."
+            exit 1
+          fi
 
       - name: Wait for health check
-        if: steps.config.outputs.enabled == 'true'
         env:
           HEALTH_URL: ${{ inputs.health_url }}
         run: |
+          sleep 5
           for attempt in $(seq 1 30); do
             status="$(curl -s -o /dev/null -w '%{http_code}' "$HEALTH_URL" || echo 000)"
             if [ "$status" = "200" ]; then
@@ -136,6 +81,5 @@ jobs:
             echo "Attempt $attempt/30: $HEALTH_URL returned $status, retrying in 10s..."
             sleep 10
           done
-
           echo "::error::$HEALTH_URL did not return 200 within 5 minutes."
           exit 1
