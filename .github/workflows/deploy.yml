@@ -4,11 +4,16 @@ on:
   workflow_call:
     inputs:
       environment:
-        description: Target environment name.
+        description: Target environment name (dev, staging, prod).
         required: true
         type: string
       image_name:
-        description: Image name without tag, e.g. ghcr.io/davincibot/admin. Defaults to ghcr.io/<repo>.
+        description: Image name without tag. Defaults to ghcr.io/<repo>.
+        required: false
+        type: string
+        default: ''
+      image_tag:
+        description: Explicit tag to deploy (e.g. sha-<commit> for a rollback). Defaults to the environment mapping (prod -> main, otherwise <environment>).
         required: false
         type: string
         default: ''
@@ -36,17 +41,21 @@ jobs:
         id: image
         env:
           IMAGE_NAME: ${{ inputs.image_name }}
+          IMAGE_TAG: ${{ inputs.image_tag }}
           REPOSITORY: ${{ github.repository }}
           ENVIRONMENT: ${{ inputs.environment }}
         run: |
-          name="$IMAGE_NAME"
-          if [ -z "$name" ]; then
-            name="ghcr.io/${REPOSITORY,,}"
+          name="${IMAGE_NAME:-ghcr.io/${REPOSITORY}}"
+          name="${name,,}"
+
+          tag="$IMAGE_TAG"
+          if [ -z "$tag" ]; then
+            case "$ENVIRONMENT" in
+              prod) tag="main" ;;
+              *) tag="$ENVIRONMENT" ;;
+            esac
           fi
-          case "$ENVIRONMENT" in
-            prod) tag="main" ;;
-            *) tag="$ENVIRONMENT" ;;
-          esac
+
           echo "ref=${name}:${tag}" >> "$GITHUB_OUTPUT"
           echo "Triggering update for: ${name}:${tag}"
 
@@ -56,15 +65,22 @@ jobs:
           WATCHTOWER_TOKEN: ${{ secrets.WATCHTOWER_TOKEN }}
           IMAGE_REF: ${{ steps.image.outputs.ref }}
         run: |
-          response="$(curl -fsS -X POST \
+          response="$(curl -fsS -X POST -G \
+            --retry 3 --retry-delay 5 --max-time 300 \
             -H "Authorization: Bearer $WATCHTOWER_TOKEN" \
-            "$WATCHTOWER_URL/v1/update?image=$IMAGE_REF")"
+            --data-urlencode "image=$IMAGE_REF" \
+            "$WATCHTOWER_URL/v1/update")"
           echo "$response" | jq .
 
           failed="$(echo "$response" | jq -r '.summary.failed // 0')"
+          updated="$(echo "$response" | jq -r '.summary.updated // 0')"
+
           if [ "$failed" != "0" ]; then
             echo "::error::Watchtower reported $failed failed update(s)."
             exit 1
+          fi
+          if [ "$updated" = "0" ]; then
+            echo "::warning::No container was updated (image already current, or no container matches $IMAGE_REF — check the watchtower label and the image tag in the compose file)."
           fi
 
       - name: Wait for health check
