@@ -1,0 +1,84 @@
+name: Shared Publish npm
+
+# Publie un package npm sur GitHub Packages (npm.pkg.github.com).
+# Idempotent : si la version du package.json est déjà publiée, le job réussit sans rien faire.
+# La publication utilise le GITHUB_TOKEN du repo appelant (packages: write) ;
+# PACKAGES_READ_TOKEN n'est requis que pour installer des dépendances @davincibot
+# publiées depuis d'autres repos.
+
+on:
+  workflow_call:
+    inputs:
+      package_dir:
+        description: Directory containing the package.json to publish.
+        required: false
+        type: string
+        default: .
+      pnpm_version:
+        description: pnpm version to install.
+        required: false
+        type: string
+        default: '11.5.2'
+      node_version_file:
+        description: Node version file path.
+        required: false
+        type: string
+        default: .nvmrc
+      build_command:
+        description: Optional build command run in package_dir before publishing.
+        required: false
+        type: string
+        default: ''
+    secrets:
+      PACKAGES_READ_TOKEN:
+        description: Token with read:packages, needed only to install private @davincibot dependencies from other repos.
+        required: false
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    name: Publish ${{ inputs.package_dir }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      NPM_TOKEN: ${{ secrets.PACKAGES_READ_TOKEN || github.token }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: ${{ inputs.pnpm_version }}
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ${{ inputs.node_version_file }}
+          registry-url: https://npm.pkg.github.com
+          scope: '@davincibot'
+
+      - name: Install dependencies
+        if: ${{ hashFiles('pnpm-lock.yaml') != '' }}
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        if: ${{ inputs.build_command != '' }}
+        working-directory: ${{ inputs.package_dir }}
+        run: ${{ inputs.build_command }}
+
+      - name: Publish if version not already published
+        working-directory: ${{ inputs.package_dir }}
+        env:
+          # La publication et le npm view utilisent le token du repo (packages: write),
+          # pas le token de lecture : un read token ne peut pas publier.
+          NPM_TOKEN: ${{ github.token }}
+          NODE_AUTH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          PKG=$(node -p "require('./package.json').name")
+          if npm view "${PKG}@${VERSION}" version 2>/dev/null; then
+            echo "Version ${VERSION} already published, skipping"
+          else
+            pnpm publish --no-git-checks
+          fi

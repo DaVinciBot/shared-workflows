@@ -20,6 +20,10 @@ Available workflows:
 - `.github/workflows/deploy.yml`: deploy applications through Dokploy.
 - `.github/workflows/e2e.yml`: run Playwright end-to-end tests.
 - `.github/workflows/security-scan.yml`: run security scans.
+- `.github/workflows/publish-npm.yml`: publish an npm package to GitHub Packages
+  (npm.pkg.github.com). Idempotent (skips already-published versions). Inputs:
+  `package_dir`, `build_command`, `pnpm_version`, `node_version_file`. No npm
+  provenance: attestation is npmjs-only.
 
 Required repository or organization setup:
 
@@ -33,6 +37,11 @@ Required repository or organization setup:
   - `DOKPLOY_URL`
   - `DOKPLOY_API_KEY`
   - `GHCR_TOKEN` (PAT with `read:packages`, used by Dokploy to pull from GHCR)
+- Configure the organization secret `PACKAGES_READ_TOKEN` (PAT with
+  `read:packages` from a bot account): used by `ci.yml`/`e2e.yml` installs and
+  mounted as a Docker build secret by `container.yml` so builds can install the
+  private `@davincibot/*` packages from GitHub Packages. `container.yml` treats
+  it as required.
 - Configure environment secrets (one per environment: `dev`, `staging`, `prod`):
   - `DOKPLOY_APP_ID`
 

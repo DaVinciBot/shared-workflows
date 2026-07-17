@@ -25,6 +25,9 @@ on:
         required: false
       PUBLIC_SUPABASE_PUBLISHABLE_KEY:
         required: false
+      PACKAGES_READ_TOKEN:
+        description: Token with read:packages used to install private @davincibot packages.
+        required: false
 
 permissions:
   contents: read
@@ -54,6 +57,8 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+        env:
+          NPM_TOKEN: ${{ secrets.PACKAGES_READ_TOKEN }}
 
       - name: Install Playwright browsers
         run: pnpm exec playwright install --with-deps
