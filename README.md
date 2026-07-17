@@ -1,7 +1,6 @@
 # Shared Workflows
 
-Reusable GitHub Actions workflows and shared tooling packages for the DaVinciBot
-SvelteKit applications.
+Reusable GitHub Actions workflows for the DaVinciBot SvelteKit applications.
 
 ## Workflows
 
@@ -21,8 +20,6 @@ Available workflows:
 - `.github/workflows/deploy.yml`: deploy applications through Dokploy.
 - `.github/workflows/e2e.yml`: run Playwright end-to-end tests.
 - `.github/workflows/security-scan.yml`: run security scans.
-- `.github/workflows/publish-packages.yml`: publish shared npm packages when
-  `packages/**` changes on `main`.
 
 Required repository or organization setup:
 
@@ -41,45 +38,5 @@ Required repository or organization setup:
 
 ## Packages
 
-This repository also publishes shared npm packages used by the apps:
-
-- `@davincibot/eslint-config`: strict ESLint flat config for SvelteKit apps.
-- `@davincibot/prettier-config`: shared Prettier settings with Svelte and Tailwind plugins.
-- `@davincibot/tsconfig`: shared TypeScript strictness for SvelteKit apps.
-
-Install them in each app with the required peer dependencies:
-
-```sh
-pnpm add -D @davincibot/eslint-config @davincibot/prettier-config @davincibot/tsconfig @eslint/js eslint eslint-config-prettier eslint-plugin-svelte globals prettier prettier-plugin-svelte prettier-plugin-tailwindcss typescript-eslint
-```
-
-Use the shared ESLint config from `eslint.config.js`:
-
-```js
-import { createConfig } from '@davincibot/eslint-config';
-import { fileURLToPath } from 'node:url';
-import svelteConfig from './svelte.config.js';
-
-export default createConfig({
- tsconfigRootDir: fileURLToPath(new URL('.', import.meta.url)),
- svelteConfig
-});
-```
-
-Use the shared Prettier config from `.prettierrc`:
-
-```json
-"@davincibot/prettier-config"
-```
-
-Extend the shared TypeScript config from `tsconfig.json`:
-
-```json
-{
- "extends": ["./.svelte-kit/tsconfig.json", "@davincibot/tsconfig/sveltekit"]
-}
-```
-
-Packages are published by `.github/workflows/publish-packages.yml` on pushes to
-`main` that modify `packages/**`, or manually through `workflow_dispatch`.
-Publishing requires the repository secret `NPM_TOKEN`.
+The shared npm packages (`@davincibot/eslint-config`, `@davincibot/prettier-config`,
+`@davincibot/tsconfig`) now live in [DaVinciBot/packages](https://github.com/DaVinciBot/packages).
