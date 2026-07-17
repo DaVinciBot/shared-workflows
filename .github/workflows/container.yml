@@ -28,6 +28,10 @@ on:
         required: false
         type: string
         default: CRITICAL
+    secrets:
+      PACKAGES_READ_TOKEN:
+        description: Token with read:packages, mounted as build secret to install private @davincibot packages inside the image build.
+        required: true
     outputs:
       image:
         description: Image name (without tag).
@@ -98,6 +102,10 @@ jobs:
           cache-to: type=gha,mode=max
           provenance: ${{ inputs.push }}
           sbom: ${{ inputs.push }}
+          # Monté via RUN --mount=type=secret,id=npm_token dans les Dockerfiles ;
+          # jamais présent dans une layer de l'image.
+          secrets: |
+            npm_token=${{ secrets.PACKAGES_READ_TOKEN }}
 
       - name: Export image metadata
         id: export
