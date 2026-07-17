@@ -46,7 +46,7 @@ jobs:
     env:
       NPM_TOKEN: ${{ secrets.PACKAGES_READ_TOKEN || github.token }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - uses: pnpm/action-setup@v6
         with:
