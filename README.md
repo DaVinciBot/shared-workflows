@@ -14,8 +14,14 @@ jobs:
 
 Available workflows:
 
-- `.github/workflows/ci.yml`: shared quality gates (`pnpm check`, `pnpm lint`,
-  `pnpm test:unit`, `pnpm build`).
+- `.github/workflows/ci.yml`: shared quality gates. By default runs `pnpm check`,
+  `pnpm lint`, `pnpm test:unit`, `pnpm build` at the repository root. Inputs:
+  `pnpm_version`, `node_version_file`, `working_directory` (directory the gate
+  commands run in — dependencies are still installed from the repo root so pnpm
+  workspaces link correctly), `commands` (JSON array of `{name, command}` to run
+  only the scripts a package defines; overrides the default gates). The
+  `working_directory`/`commands` inputs let a monorepo call the workflow once per
+  package (see [DaVinciBot/packages](https://github.com/DaVinciBot/packages)).
 - `.github/workflows/container.yml`: build and publish application containers.
 - `.github/workflows/deploy.yml`: deploy applications through Dokploy.
 - `.github/workflows/e2e.yml`: run Playwright end-to-end tests.

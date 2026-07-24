@@ -13,6 +13,23 @@ on:
         required: false
         type: string
         default: .nvmrc
+      working_directory:
+        description: >-
+          Directory in which the quality-gate commands run. Dependencies are
+          always installed from the repository root so pnpm workspaces link
+          correctly; only the commands run here. Defaults to the repo root.
+        required: false
+        type: string
+        default: '.'
+      commands:
+        description: >-
+          JSON array of {name, command} objects to run as the quality-gate
+          matrix. Use it to run only the scripts a given package actually
+          defines. When empty, the default gates (check, lint, test:unit,
+          build) run at the repository root.
+        required: false
+        type: string
+        default: ''
     secrets:
       NIXPACKS_NODE_VERSION:
         required: false
@@ -39,15 +56,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - name: Typecheck
-            command: pnpm check
-          - name: Lint
-            command: pnpm lint
-          - name: Unit Tests
-            command: pnpm test:unit
-          - name: Build
-            command: pnpm build
+        include: ${{ fromJSON(inputs.commands != '' && inputs.commands || '[{"name":"Typecheck","command":"pnpm check"},{"name":"Lint","command":"pnpm lint"},{"name":"Unit Tests","command":"pnpm test:unit"},{"name":"Build","command":"pnpm build"}]') }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -69,3 +78,4 @@ jobs:
 
       - name: Run ${{ matrix.name }}
         run: ${{ matrix.command }}
+        working-directory: ${{ inputs.working_directory }}
