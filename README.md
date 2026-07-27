@@ -9,7 +9,7 @@ Application repositories should call reusable workflows by release tag:
 ```yaml
 jobs:
   ci:
-    uses: DaVinciBot/shared-workflows/.github/workflows/ci.yml@v5.0.0
+    uses: DaVinciBot/shared-workflows/.github/workflows/ci.yml@v5.1.1
 ```
 
 Available workflows:
@@ -34,7 +34,7 @@ Available workflows:
 Required repository or organization setup:
 
 - Allow application repositories to use reusable workflows from `DaVinciBot/shared-workflows`.
-- Create and maintain version tags such as `v5.0.0` after changes are reviewed.
+- Create and maintain version tags such as `v5.1.1` after changes are reviewed.
 - Grant GitHub Actions `packages: write` for workflows that publish to GHCR.
 - Grant GitHub Actions `id-token: write` for workflows that create keyless Cosign and npm signatures.
 - Configure deployment environments `dev`, `staging`, and `prod` in application repositories,
@@ -53,5 +53,11 @@ Required repository or organization setup:
 
 ## Packages
 
-The shared npm packages (`@davincibot/eslint-config`, `@davincibot/prettier-config`,
-`@davincibot/tsconfig`) now live in [DaVinciBot/packages](https://github.com/DaVinciBot/packages).
+The shared npm packages live in [DaVinciBot/packages](https://github.com/DaVinciBot/packages):
+`@davincibot/config`, `@davincibot/lib` and `@davincibot/components`, published to
+GitHub Packages (private) via `publish-npm.yml`. `@davincibot/database-types` is
+published the same way from [DaVinciBot/Supabased](https://github.com/DaVinciBot/Supabased).
+
+The first-generation packages (`@davincibot/eslint-config`,
+`@davincibot/prettier-config`, `@davincibot/tsconfig`, on public npmjs) are frozen
+and deprecated in favour of `@davincibot/config` v2+.

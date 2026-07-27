@@ -59,8 +59,6 @@ jobs:
         include: ${{ fromJSON(inputs.commands != '' && inputs.commands || '[{"name":"Typecheck","command":"pnpm check"},{"name":"Lint","command":"pnpm lint"},{"name":"Unit Tests","command":"pnpm test:unit"},{"name":"Build","command":"pnpm build"}]') }}
     steps:
       - uses: actions/checkout@v7
-        with:
-          submodules: recursive
 
       - uses: pnpm/action-setup@v6
         with:

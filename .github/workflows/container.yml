@@ -56,8 +56,6 @@ jobs:
       digest: ${{ steps.export.outputs.digest }}
     steps:
       - uses: actions/checkout@v7
-        with:
-          submodules: recursive
 
       - name: Set image name
         env:

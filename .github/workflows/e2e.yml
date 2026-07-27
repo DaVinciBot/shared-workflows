@@ -43,8 +43,6 @@ jobs:
       PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.PUBLIC_SUPABASE_PUBLISHABLE_KEY || 'local-anon-key' }}
     steps:
       - uses: actions/checkout@v7
-        with:
-          submodules: recursive
 
       - uses: pnpm/action-setup@v6
         with:
@@ -68,7 +66,7 @@ jobs:
 
       - name: Upload Playwright report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: playwright-report
           path: |
