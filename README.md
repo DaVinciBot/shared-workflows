@@ -9,7 +9,7 @@ Application repositories should call reusable workflows by release tag:
 ```yaml
 jobs:
   ci:
-    uses: DaVinciBot/shared-workflows/.github/workflows/ci.yml@v6.0.0
+    uses: DaVinciBot/shared-workflows/.github/workflows/ci.yml@v6.1.0
 ```
 
 Available workflows:
@@ -21,12 +21,13 @@ Available workflows:
   only the scripts a package defines; overrides the default gates). The
   `working_directory`/`commands` inputs let a monorepo call the workflow once per package
   (see [DaVinciBot/packages](https://github.com/DaVinciBot/packages)).
-- `.github/workflows/container.yml`: build and publish application containers. Gates the image with `hadolint` (before
-  the build), then `dive --ci` and
-  `dockle` on the image itself, then Trivy on the published image. On a pull request the build uses `load` instead of
-  `push`, so `dive` and `dockle` still have an image to inspect. Inputs pin each tool and point at its config:
-  `hadolint_version`/`hadolint_config`, `dive_version`/`dive_config`,
-  `dockle_version`/`dockle_exit_level`.
+- `.github/workflows/container.yml`: build and publish application containers. Nothing is published before the gates
+  pass: `hadolint` runs on the Dockerfile, the image is then built with `load` (never `push`) and inspected locally by
+  `dive --ci`, `dockle` and Trivy — same path on a pull request and on a branch push. Only then, and only when `push` is
+  true, a second build publishes to GHCR: every layer is served from the cache of the audited build, so the published
+  image is the one that was inspected, and it carries the provenance and SBOM attestations the local build cannot
+  export. Inputs pin each tool and point at its config: `hadolint_version`/`hadolint_config`,
+  `dive_version`/`dive_config`, `dockle_version`/`dockle_exit_level`, `trivy_severity`.
 - `.github/workflows/deploy.yml`: deploy applications through Dokploy.
 - `.github/workflows/e2e.yml`: run Playwright end-to-end tests.
 - `.github/workflows/security-scan.yml`: run security scans — dependency review, Trivy on the filesystem, and `checkov`
@@ -48,7 +49,7 @@ repository tunes its own thresholds without touching this repository:
 Required repository or organization setup:
 
 - Allow application repositories to use reusable workflows from `DaVinciBot/shared-workflows`.
-- Create and maintain version tags such as `v6.0.0` after changes are reviewed.
+- Create and maintain version tags such as `v6.1.0` after changes are reviewed.
 - Grant GitHub Actions `packages: write` for workflows that publish to GHCR.
 - Grant GitHub Actions `id-token: write` for workflows that create keyless Cosign and npm signatures.
 - Configure deployment environments `dev`, `staging`, and `prod` in application repositories, with a required reviewer

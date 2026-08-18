@@ -24,7 +24,7 @@ on:
         type: string
         default: ./Dockerfile
       trivy_severity:
-        description: Severity gate for the published image scan.
+        description: Severity gate for the image scan.
         required: false
         type: string
         default: CRITICAL
@@ -134,59 +134,35 @@ jobs:
         with:
           context: ${{ inputs.context }}
           file: ${{ inputs.dockerfile }}
-          push: ${{ inputs.push }}
-          load: ${{ !inputs.push }}
+          push: false
+          load: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          provenance: ${{ inputs.push }}
-          sbom: ${{ inputs.push }}
+          provenance: false
+          sbom: false
           # Monté via RUN --mount=type=secret,id=npm_token dans les Dockerfiles ;
           # jamais présent dans une layer de l'image.
           secrets: |
             npm_token=${{ secrets.PACKAGES_READ_TOKEN }}
 
-      - name: Export image metadata
-        id: export
-        env:
-          DIGEST: ${{ steps.build.outputs.digest }}
-          TAGS: ${{ steps.meta.outputs.tags }}
-        run: |
-          echo "image=${IMAGE_NAME}" >> "$GITHUB_OUTPUT"
-          echo "digest=${DIGEST}" >> "$GITHUB_OUTPUT"
-          {
-            echo "image=${IMAGE_NAME}"
-            echo "digest=${DIGEST}"
-            echo "tags<<EOF"
-            echo "${TAGS}"
-            echo "EOF"
-          } > image-metadata.txt
-
-      - name: Upload image metadata
-        uses: actions/upload-artifact@v4
-        with:
-          name: image-metadata
-          path: image-metadata.txt
-          if-no-files-found: error
-
       - name: Resolve image reference
         id: ref
         env:
-          PUSHED: ${{ inputs.push }}
-          DIGEST: ${{ steps.build.outputs.digest }}
           TAGS: ${{ steps.meta.outputs.tags }}
         run: |
-          if [ "$PUSHED" = "true" ]; then
-            REF="${IMAGE_NAME}@${DIGEST}"
-            docker pull --quiet "$REF"
-          else
+          REF="$(printf '%s\n' "$TAGS" | grep -m1 ':sha-' || true)"
+
+          if [ -z "$REF" ]; then
             REF="$(printf '%s\n' "$TAGS" | head -n 1)"
           fi
+
           if [ -z "$REF" ]; then
-            echo "::error::aucune image à inspecter (tags et digest vides)"
+            echo "::error::aucune image à inspecter (tags vides)"
             exit 1
           fi
+
           echo "ref=${REF}" >> "$GITHUB_OUTPUT"
 
       - name: Analyse image layers
@@ -212,27 +188,65 @@ jobs:
             "$DOCKLE_IMAGE" \
             --no-color --exit-code 1 --exit-level "$DOCKLE_EXIT_LEVEL" "$IMAGE_REF"
 
-      - name: Scan published image
-        if: inputs.push && steps.build.outputs.digest != ''
+      - name: Scan image
         uses: aquasecurity/trivy-action@v0.36.0
         with:
-          image-ref: ${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
+          image-ref: ${{ steps.ref.outputs.ref }}
           format: table
           vuln-type: os,library
           severity: ${{ inputs.trivy_severity }}
           ignore-unfixed: true
           exit-code: '1'
 
+      - name: Publish image
+        id: publish
+        if: inputs.push
+        uses: docker/build-push-action@v7
+        with:
+          context: ${{ inputs.context }}
+          file: ${{ inputs.dockerfile }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          provenance: true
+          sbom: true
+          secrets: |
+            npm_token=${{ secrets.PACKAGES_READ_TOKEN }}
+
+      - name: Export image metadata
+        id: export
+        env:
+          DIGEST: ${{ steps.publish.outputs.digest }}
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          echo "image=${IMAGE_NAME}" >> "$GITHUB_OUTPUT"
+          echo "digest=${DIGEST}" >> "$GITHUB_OUTPUT"
+          {
+            echo "image=${IMAGE_NAME}"
+            echo "digest=${DIGEST}"
+            echo "tags<<EOF"
+            echo "${TAGS}"
+            echo "EOF"
+          } > image-metadata.txt
+
+      - name: Upload image metadata
+        uses: actions/upload-artifact@v4
+        with:
+          name: image-metadata
+          path: image-metadata.txt
+          if-no-files-found: error
+
       - name: Generate image SBOM
-        if: inputs.push && steps.build.outputs.digest != ''
+        if: inputs.push && steps.publish.outputs.digest != ''
         uses: anchore/sbom-action@v0
         with:
-          image: ${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
+          image: ${{ env.IMAGE_NAME }}@${{ steps.publish.outputs.digest }}
           format: spdx-json
           output-file: image-sbom.spdx.json
 
       - name: Upload image SBOM
-        if: inputs.push && steps.build.outputs.digest != ''
+        if: inputs.push && steps.publish.outputs.digest != ''
         uses: actions/upload-artifact@v4
         with:
           name: image-sbom
@@ -240,11 +254,11 @@ jobs:
           if-no-files-found: error
 
       - name: Install Cosign
-        if: inputs.push && steps.build.outputs.digest != ''
+        if: inputs.push && steps.publish.outputs.digest != ''
         uses: sigstore/cosign-installer@v3
 
       - name: Sign published image
-        if: inputs.push && steps.build.outputs.digest != ''
+        if: inputs.push && steps.publish.outputs.digest != ''
         env:
-          IMAGE_REF: ${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
+          IMAGE_REF: ${{ env.IMAGE_NAME }}@${{ steps.publish.outputs.digest }}
         run: cosign sign --yes "$IMAGE_REF"
