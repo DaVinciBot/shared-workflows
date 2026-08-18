@@ -13,6 +13,16 @@ on:
         required: false
         type: string
         default: high
+      checkov_version:
+        description: checkov image tag used to scan configuration.
+        required: false
+        type: string
+        default: 3.3.11
+      checkov_config:
+        description: checkov configuration, relative to the repository root. Owns the frameworks, the skipped paths and the waived checks.
+        required: false
+        type: string
+        default: .checkov.yaml
 
 permissions:
   contents: read
@@ -69,3 +79,29 @@ jobs:
           severity: ${{ inputs.fs_gate_severity }}
           ignore-unfixed: true
           exit-code: '1'
+
+  checkov:
+    name: Checkov
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Scan configuration
+        env:
+          CHECKOV_IMAGE: bridgecrew/checkov:${{ inputs.checkov_version }}
+          CHECKOV_CONFIG: ${{ inputs.checkov_config }}
+        run: |
+          docker run --rm \
+            -v "${PWD}:/repo" -w /repo \
+            "$CHECKOV_IMAGE" \
+            --config-file "$CHECKOV_CONFIG" \
+            --output cli --output sarif \
+            --output-file-path console,checkov.sarif
+
+      - name: Upload SARIF
+        if: always()
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: checkov.sarif

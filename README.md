@@ -9,55 +9,68 @@ Application repositories should call reusable workflows by release tag:
 ```yaml
 jobs:
   ci:
-    uses: DaVinciBot/shared-workflows/.github/workflows/ci.yml@v5.1.1
+    uses: DaVinciBot/shared-workflows/.github/workflows/ci.yml@v6.0.0
 ```
 
 Available workflows:
 
 - `.github/workflows/ci.yml`: shared quality gates. By default runs `pnpm check`,
   `pnpm lint`, `pnpm test:unit`, `pnpm build` at the repository root. Inputs:
-  `pnpm_version`, `node_version_file`, `working_directory` (directory the gate
-  commands run in — dependencies are still installed from the repo root so pnpm
-  workspaces link correctly), `commands` (JSON array of `{name, command}` to run
+  `pnpm_version`, `node_version_file`, `working_directory` (directory the gate commands run in — dependencies are still
+  installed from the repo root so pnpm workspaces link correctly), `commands` (JSON array of `{name, command}` to run
   only the scripts a package defines; overrides the default gates). The
-  `working_directory`/`commands` inputs let a monorepo call the workflow once per
-  package (see [DaVinciBot/packages](https://github.com/DaVinciBot/packages)).
-- `.github/workflows/container.yml`: build and publish application containers.
+  `working_directory`/`commands` inputs let a monorepo call the workflow once per package
+  (see [DaVinciBot/packages](https://github.com/DaVinciBot/packages)).
+- `.github/workflows/container.yml`: build and publish application containers. Gates the image with `hadolint` (before
+  the build), then `dive --ci` and
+  `dockle` on the image itself, then Trivy on the published image. On a pull request the build uses `load` instead of
+  `push`, so `dive` and `dockle` still have an image to inspect. Inputs pin each tool and point at its config:
+  `hadolint_version`/`hadolint_config`, `dive_version`/`dive_config`,
+  `dockle_version`/`dockle_exit_level`.
 - `.github/workflows/deploy.yml`: deploy applications through Dokploy.
 - `.github/workflows/e2e.yml`: run Playwright end-to-end tests.
-- `.github/workflows/security-scan.yml`: run security scans.
-- `.github/workflows/publish-npm.yml`: publish an npm package to GitHub Packages
-  (npm.pkg.github.com). Idempotent (skips already-published versions). Inputs:
-  `package_dir`, `build_command`, `pnpm_version`, `node_version_file`. No npm
-  provenance: attestation is npmjs-only.
+- `.github/workflows/security-scan.yml`: run security scans — dependency review, Trivy on the filesystem, and `checkov`
+  on the Dockerfile and the workflows. Inputs: `checkov_version`, `checkov_config`.
+- `.github/workflows/publish-npm.yml`: publish an npm package to GitHub Packages (npm.pkg.github.com). Idempotent (skips
+  already-published versions). Inputs:
+  `package_dir`, `build_command`, `pnpm_version`, `node_version_file`. No npm provenance: attestation is npmjs-only.
+
+Each application repository carries the container tooling configs at its root. They are read from the checkout, so a
+repository tunes its own thresholds without touching this repository:
+
+| File             | Tool     | Holds                                                  |
+|------------------|----------|--------------------------------------------------------|
+| `.hadolint.yaml` | hadolint | failure threshold, ignored rules, trusted registries   |
+| `.dive-ci`       | dive     | efficiency, wasted bytes and wasted-percent thresholds |
+| `.dockleignore`  | dockle   | waived CIS checkpoints                                 |
+| `.checkov.yaml`  | checkov  | frameworks, skipped paths, waived checks               |
 
 Required repository or organization setup:
 
 - Allow application repositories to use reusable workflows from `DaVinciBot/shared-workflows`.
-- Create and maintain version tags such as `v5.1.1` after changes are reviewed.
+- Create and maintain version tags such as `v6.0.0` after changes are reviewed.
 - Grant GitHub Actions `packages: write` for workflows that publish to GHCR.
 - Grant GitHub Actions `id-token: write` for workflows that create keyless Cosign and npm signatures.
-- Configure deployment environments `dev`, `staging`, and `prod` in application repositories,
-  with a required reviewer on `prod`.
+- Configure deployment environments `dev`, `staging`, and `prod` in application repositories, with a required reviewer
+  on `prod`.
 - Configure repository secrets (shared across environments):
-  - `DOKPLOY_URL`
-  - `DOKPLOY_API_KEY`
-  - `GHCR_TOKEN` (PAT with `read:packages`, used by Dokploy to pull from GHCR)
+    - `DOKPLOY_URL`
+    - `DOKPLOY_API_KEY`
+    - `GHCR_TOKEN` (PAT with `read:packages`, used by Dokploy to pull from GHCR)
 - Configure the organization secret `PACKAGES_READ_TOKEN` (PAT with
-  `read:packages` from a bot account): used by `ci.yml`/`e2e.yml` installs and
-  mounted as a Docker build secret by `container.yml` so builds can install the
-  private `@davincibot/*` packages from GitHub Packages. `container.yml` treats
-  it as required.
+  `read:packages` from a bot account): used by `ci.yml`/`e2e.yml` installs and mounted as a Docker build secret by
+  `container.yml` so builds can install the private `@davincibot/*` packages from GitHub Packages. `container.yml`
+  treats it as required.
 - Configure environment secrets (one per environment: `dev`, `staging`, `prod`):
-  - `DOKPLOY_APP_ID`
+    - `DOKPLOY_APP_ID`
 
 ## Packages
 
 The shared npm packages live in [DaVinciBot/packages](https://github.com/DaVinciBot/packages):
-`@davincibot/config`, `@davincibot/lib` and `@davincibot/components`, published to
-GitHub Packages (private) via `publish-npm.yml`. `@davincibot/database-types` is
-published the same way from [DaVinciBot/Supabased](https://github.com/DaVinciBot/Supabased).
+`@davincibot/config`, `@davincibot/lib` and `@davincibot/components`, published to GitHub Packages (private) via
+`publish-npm.yml`. `@davincibot/database-types` is published the same way
+from [DaVinciBot/Supabased](https://github.com/DaVinciBot/Supabased).
 
 The first-generation packages (`@davincibot/eslint-config`,
-`@davincibot/prettier-config`, `@davincibot/tsconfig`, on public npmjs) are frozen
-and deprecated in favour of `@davincibot/config` v2+.
+`@davincibot/prettier-config`, `@davincibot/tsconfig`, on public npmjs) are frozen and deprecated in favour of
+`@davincibot/config` v2+.

@@ -28,6 +28,36 @@ on:
         required: false
         type: string
         default: CRITICAL
+      hadolint_version:
+        description: hadolint image tag used to lint the Dockerfile.
+        required: false
+        type: string
+        default: v2.14.0
+      hadolint_config:
+        description: hadolint configuration, relative to the repository root. Owns the failure threshold and the ignored rules.
+        required: false
+        type: string
+        default: .hadolint.yaml
+      dive_version:
+        description: dive image tag used to analyse image layers.
+        required: false
+        type: string
+        default: v0.13.1
+      dive_config:
+        description: dive CI rules file, relative to the repository root. Owns the efficiency and wasted-bytes thresholds.
+        required: false
+        type: string
+        default: .dive-ci
+      dockle_version:
+        description: dockle image tag used to lint the built image.
+        required: false
+        type: string
+        default: v0.4.15
+      dockle_exit_level:
+        description: dockle severity that fails the job (INFO, WARN, FATAL). Individual checkpoints are waived through .dockleignore.
+        required: false
+        type: string
+        default: WARN
     secrets:
       PACKAGES_READ_TOKEN:
         description: Token with read:packages, mounted as build secret to install private @davincibot packages inside the image build.
@@ -56,6 +86,17 @@ jobs:
       digest: ${{ steps.export.outputs.digest }}
     steps:
       - uses: actions/checkout@v7
+
+      - name: Lint Dockerfile
+        env:
+          HADOLINT_IMAGE: hadolint/hadolint:${{ inputs.hadolint_version }}
+          HADOLINT_CONFIG: ${{ inputs.hadolint_config }}
+          DOCKERFILE: ${{ inputs.dockerfile }}
+        run: |
+          docker run --rm \
+            -v "${PWD}:/repo:ro" -w /repo \
+            "$HADOLINT_IMAGE" \
+            hadolint --no-color --config "$HADOLINT_CONFIG" "$DOCKERFILE"
 
       - name: Set image name
         env:
@@ -94,6 +135,7 @@ jobs:
           context: ${{ inputs.context }}
           file: ${{ inputs.dockerfile }}
           push: ${{ inputs.push }}
+          load: ${{ !inputs.push }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
@@ -127,6 +169,48 @@ jobs:
           name: image-metadata
           path: image-metadata.txt
           if-no-files-found: error
+
+      - name: Resolve image reference
+        id: ref
+        env:
+          PUSHED: ${{ inputs.push }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          if [ "$PUSHED" = "true" ]; then
+            REF="${IMAGE_NAME}@${DIGEST}"
+            docker pull --quiet "$REF"
+          else
+            REF="$(printf '%s\n' "$TAGS" | head -n 1)"
+          fi
+          if [ -z "$REF" ]; then
+            echo "::error::aucune image à inspecter (tags et digest vides)"
+            exit 1
+          fi
+          echo "ref=${REF}" >> "$GITHUB_OUTPUT"
+
+      - name: Analyse image layers
+        env:
+          DIVE_IMAGE: wagoodman/dive:${{ inputs.dive_version }}
+          DIVE_CONFIG: ${{ inputs.dive_config }}
+          IMAGE_REF: ${{ steps.ref.outputs.ref }}
+        run: |
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v "${PWD}:/repo:ro" -w /repo \
+            "$DIVE_IMAGE" --ci --ci-config "$DIVE_CONFIG" "$IMAGE_REF"
+
+      - name: Lint image
+        env:
+          DOCKLE_IMAGE: goodwithtech/dockle:${{ inputs.dockle_version }}
+          DOCKLE_EXIT_LEVEL: ${{ inputs.dockle_exit_level }}
+          IMAGE_REF: ${{ steps.ref.outputs.ref }}
+        run: |
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v "${PWD}:/repo:ro" -w /repo \
+            "$DOCKLE_IMAGE" \
+            --no-color --exit-code 1 --exit-level "$DOCKLE_EXIT_LEVEL" "$IMAGE_REF"
 
       - name: Scan published image
         if: inputs.push && steps.build.outputs.digest != ''
