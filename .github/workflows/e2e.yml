@@ -40,7 +40,7 @@ jobs:
     env:
       NIXPACKS_NODE_VERSION: ${{ secrets.NIXPACKS_NODE_VERSION || '22' }}
       PUBLIC_SUPABASE_URL: ${{ secrets.PUBLIC_SUPABASE_URL || 'https://project.supabase.co' }}
-      PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.PUBLIC_SUPABASE_PUBLISHABLE_KEY || 'local-anon-key' }}
+      PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.PUBLIC_SUPABASE_PUBLISHABLE_KEY || 'sb_publishable_xx' }}
     steps:
       - uses: actions/checkout@v7
 
