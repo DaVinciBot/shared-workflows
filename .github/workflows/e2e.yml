@@ -19,12 +19,6 @@ on:
         type: string
         default: pnpm test:e2e
     secrets:
-      NIXPACKS_NODE_VERSION:
-        required: false
-      PUBLIC_SUPABASE_URL:
-        required: false
-      PUBLIC_SUPABASE_PUBLISHABLE_KEY:
-        required: false
       PACKAGES_READ_TOKEN:
         description: Token with read:packages used to install private @davincibot packages.
         required: false
@@ -37,10 +31,6 @@ jobs:
     name: E2E Tests
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    env:
-      NIXPACKS_NODE_VERSION: ${{ secrets.NIXPACKS_NODE_VERSION || '22' }}
-      PUBLIC_SUPABASE_URL: ${{ secrets.PUBLIC_SUPABASE_URL || 'https://project.supabase.co' }}
-      PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.PUBLIC_SUPABASE_PUBLISHABLE_KEY || 'sb_publishable_xx' }}
     steps:
       - uses: actions/checkout@v7
 
