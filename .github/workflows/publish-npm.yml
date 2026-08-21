@@ -41,7 +41,7 @@ permissions:
 jobs:
   publish:
     name: Publish ${{ inputs.package_dir }}
-    runs-on: ubuntu-latest
+    runs-on: helsinki
     timeout-minutes: 15
     env:
       NPM_TOKEN: ${{ secrets.PACKAGES_READ_TOKEN || github.token }}

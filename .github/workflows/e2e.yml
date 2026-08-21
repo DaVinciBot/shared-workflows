@@ -29,7 +29,7 @@ permissions:
 jobs:
   e2e:
     name: E2E Tests
-    runs-on: ubuntu-latest
+    runs-on: helsinki
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7

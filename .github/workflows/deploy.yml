@@ -33,7 +33,7 @@ permissions:
 jobs:
   deploy:
     name: Deploy ${{ inputs.environment }}
-    runs-on: ubuntu-latest
+    runs-on: helsinki
     timeout-minutes: 15
     environment: ${{ inputs.environment }}
     steps:

@@ -33,7 +33,7 @@ jobs:
   dependency-review:
     name: Dependency Review
     if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
+    runs-on: helsinki
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
@@ -44,7 +44,7 @@ jobs:
 
   trivy-fs:
     name: Trivy FS
-    runs-on: ubuntu-latest
+    runs-on: helsinki
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
@@ -82,7 +82,7 @@ jobs:
 
   checkov:
     name: Checkov
-    runs-on: ubuntu-latest
+    runs-on: helsinki
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7

@@ -41,7 +41,7 @@ permissions:
 jobs:
   quality-gates:
     name: ${{ matrix.name }}
-    runs-on: ubuntu-latest
+    runs-on: helsinki
     timeout-minutes: 20
     strategy:
       fail-fast: false

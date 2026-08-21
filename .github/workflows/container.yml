@@ -79,7 +79,7 @@ permissions:
 jobs:
   container:
     name: Container Image
-    runs-on: ubuntu-latest
+    runs-on: helsinki
     timeout-minutes: 35
     outputs:
       image: ${{ steps.export.outputs.image }}
