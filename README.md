@@ -9,7 +9,7 @@ Application repositories should call reusable workflows by release tag:
 ```yaml
 jobs:
   ci:
-    uses: DaVinciBot/shared-workflows/.github/workflows/ci.yml@v6.1.3
+    uses: DaVinciBot/shared-workflows/.github/workflows/ci.yml@v6.1.2
 ```
 
 Available workflows:
@@ -49,7 +49,7 @@ repository tunes its own thresholds without touching this repository:
 Required repository or organization setup:
 
 - Allow application repositories to use reusable workflows from `DaVinciBot/shared-workflows`.
-- Create and maintain version tags such as `v6.1.3` after changes are reviewed.
+- Create and maintain version tags such as `v6.1.2` after changes are reviewed.
 - Grant GitHub Actions `packages: write` for workflows that publish to GHCR.
 - Grant GitHub Actions `id-token: write` for workflows that create keyless Cosign and npm signatures.
 - Configure deployment environments `dev`, `staging`, and `prod` in application repositories, with a required reviewer
