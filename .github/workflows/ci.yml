@@ -41,7 +41,7 @@ permissions:
 jobs:
   quality-gates:
     name: ${{ matrix.name }}
-    runs-on: helsinki
+    runs-on: [self-hosted, helsinki]
     timeout-minutes: 20
     strategy:
       fail-fast: false

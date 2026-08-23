@@ -33,7 +33,7 @@ permissions:
 jobs:
   deploy:
     name: Deploy ${{ inputs.environment }}
-    runs-on: helsinki
+    runs-on: [self-hosted, helsinki]
     timeout-minutes: 15
     environment: ${{ inputs.environment }}
     steps:

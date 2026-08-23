@@ -18,6 +18,14 @@ on:
         required: false
         type: string
         default: pnpm test:e2e
+      playwright_install_deps:
+        description: >-
+          Install the Playwright system libraries with apt on every run. Off by default: the self-hosted runner shares
+          its host with production, and --with-deps needs passwordless sudo and mutates that host at each run. The
+          libraries are a one-off host setup instead; the browsers themselves persist in the runner cache.
+        required: false
+        type: boolean
+        default: false
     secrets:
       PACKAGES_READ_TOKEN:
         description: Token with read:packages used to install private @davincibot packages.
@@ -29,7 +37,7 @@ permissions:
 jobs:
   e2e:
     name: E2E Tests
-    runs-on: helsinki
+    runs-on: [self-hosted, helsinki]
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
@@ -50,7 +58,14 @@ jobs:
           NPM_TOKEN: ${{ secrets.PACKAGES_READ_TOKEN }}
 
       - name: Install Playwright browsers
-        run: pnpm exec playwright install --with-deps
+        env:
+          WITH_DEPS: ${{ inputs.playwright_install_deps }}
+        run: |
+          if [ "$WITH_DEPS" = "true" ]; then
+            pnpm exec playwright install --with-deps
+          else
+            pnpm exec playwright install
+          fi
 
       - name: Run e2e tests
         run: ${{ inputs.e2e_command }}

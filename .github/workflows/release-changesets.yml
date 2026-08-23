@@ -40,7 +40,7 @@ permissions:
 jobs:
   version:
     name: Version Packages PR
-    runs-on: helsinki
+    runs-on: [self-hosted, helsinki]
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7

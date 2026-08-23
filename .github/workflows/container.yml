@@ -58,6 +58,13 @@ on:
         required: false
         type: string
         default: WARN
+      buildx_cache_dir:
+        description: >-
+          Root of the buildx local cache on the self-hosted runner. One subdirectory per repository, so two repos never
+          share a cache. Kept bounded by writing to a scratch directory and swapping it in after the build.
+        required: false
+        type: string
+        default: /opt/buildx-cache
     secrets:
       PACKAGES_READ_TOKEN:
         description: Token with read:packages, mounted as build secret to install private @davincibot packages inside the image build.
@@ -79,7 +86,7 @@ permissions:
 jobs:
   container:
     name: Container Image
-    runs-on: helsinki
+    runs-on: [self-hosted, helsinki]
     timeout-minutes: 35
     outputs:
       image: ${{ steps.export.outputs.image }}
@@ -105,6 +112,20 @@ jobs:
         run: |
           IMAGE_NAME="${INPUT_IMAGE_NAME:-ghcr.io/${REPOSITORY}}"
           echo "IMAGE_NAME=${IMAGE_NAME,,}" >> "$GITHUB_ENV"
+
+      # Cache local du runner : les layers restent sur le disque de la box, rien ne transite
+      # par le cache réseau de GitHub. Un sous-dossier par repo évite les collisions.
+      - name: Resolve buildx cache directory
+        id: cache
+        env:
+          CACHE_ROOT: ${{ inputs.buildx_cache_dir }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          slug="${REPOSITORY//\//-}"
+          dir="${CACHE_ROOT}/${slug,,}"
+          mkdir -p "$dir"
+          echo "dir=${dir}" >> "$GITHUB_OUTPUT"
+          echo "scratch=${dir}-new" >> "$GITHUB_OUTPUT"
 
       - uses: docker/setup-buildx-action@v3
 
@@ -138,14 +159,29 @@ jobs:
           load: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=local,src=${{ steps.cache.outputs.dir }}
+          cache-to: type=local,dest=${{ steps.cache.outputs.scratch }},mode=max
           provenance: false
           sbom: false
           # Monté via RUN --mount=type=secret,id=npm_token dans les Dockerfiles ;
           # jamais présent dans une layer de l'image.
           secrets: |
             npm_token=${{ secrets.PACKAGES_READ_TOKEN }}
+
+      # buildx n'expire jamais un cache local : sans rotation /opt/buildx-cache grossit
+      # sans limite. On écrit dans un scratch puis on remplace, ce qui borne la taille
+      # à une génération de layers au lieu de toutes les cumuler.
+      - name: Rotate buildx cache
+        if: always() && steps.cache.outputs.scratch != ''
+        env:
+          CACHE_DIR: ${{ steps.cache.outputs.dir }}
+          CACHE_SCRATCH: ${{ steps.cache.outputs.scratch }}
+        run: |
+          if [ -d "$CACHE_SCRATCH" ]; then
+            rm -rf "$CACHE_DIR"
+            mv "$CACHE_SCRATCH" "$CACHE_DIR"
+          fi
+          du -sh "$CACHE_DIR" 2>/dev/null || true
 
       - name: Resolve image reference
         id: ref
@@ -208,7 +244,7 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
+          cache-from: type=local,src=${{ steps.cache.outputs.dir }}
           provenance: true
           sbom: true
           secrets: |
@@ -231,7 +267,7 @@ jobs:
           } > image-metadata.txt
 
       - name: Upload image metadata
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: image-metadata
           path: image-metadata.txt
@@ -247,7 +283,7 @@ jobs:
 
       - name: Upload image SBOM
         if: inputs.push && steps.publish.outputs.digest != ''
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: image-sbom
           path: image-sbom.spdx.json
