@@ -1,0 +1,67 @@
+name: Shared Release (changesets)
+
+on:
+  workflow_call:
+    inputs:
+      pnpm_version:
+        description: pnpm version to install.
+        required: false
+        type: string
+        default: '11.5.2'
+      node_version_file:
+        description: Node version file path.
+        required: false
+        type: string
+        default: .nvmrc
+      version_script:
+        description: Command run by changesets to apply the changesets and bump versions.
+        required: false
+        type: string
+        default: pnpm changeset version
+      pr_title:
+        description: Title of the version PR.
+        required: false
+        type: string
+        default: 'chore: version packages'
+      commit_message:
+        description: Commit message used on the version PR.
+        required: false
+        type: string
+        default: 'chore: version packages'
+    secrets:
+      PACKAGES_READ_TOKEN:
+        description: Token with read:packages, needed only to install private @davincibot dependencies from other repos.
+        required: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  version:
+    name: Version Packages PR
+    runs-on: helsinki
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: ${{ inputs.pnpm_version }}
+          standalone: true
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: ${{ inputs.node_version_file }}
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+        env:
+          NPM_TOKEN: ${{ secrets.PACKAGES_READ_TOKEN }}
+
+      - uses: changesets/action@v2
+        with:
+          version-script: ${{ inputs.version_script }}
+          pr-title: ${{ inputs.pr_title }}
+          commit-message: ${{ inputs.commit_message }}
+          github-token: ${{ github.token }}

@@ -58,6 +58,7 @@ jobs:
       - uses: pnpm/action-setup@v6
         with:
           version: ${{ inputs.pnpm_version }}
+          standalone: true
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile

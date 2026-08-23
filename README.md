@@ -35,6 +35,10 @@ Available workflows:
 - `.github/workflows/publish-npm.yml`: publish an npm package to GitHub Packages (npm.pkg.github.com). Idempotent (skips
   already-published versions). Inputs:
   `package_dir`, `build_command`, `pnpm_version`, `node_version_file`. No npm provenance: attestation is npmjs-only.
+- `.github/workflows/release-changesets.yml`: open and keep up to date the "Version Packages" PR from the pending
+  changesets. It does not publish anything — merging that PR is what triggers `publish-npm.yml` in the calling
+  repository. Inputs: `pnpm_version`, `node_version_file`, `version_script`, `pr_title`, `commit_message`. The caller
+  must grant `contents: write` and `pull-requests: write`, since a reusable workflow can only narrow the caller's token.
 
 Each application repository carries the container tooling configs at its root. They are read from the checkout, so a
 repository tunes its own thresholds without touching this repository:
