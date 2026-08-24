@@ -69,7 +69,8 @@ on:
       buildx_cache_dir:
         description: >-
           Root of the buildx local cache on the self-hosted runner. One subdirectory per repository, so two repos never
-          share a cache. Kept bounded by writing to a scratch directory and swapping it in after the build.
+          share a cache. Kept bounded by writing to a scratch directory and swapping it in after the build. Ignored on a
+          GitHub-hosted runner, where the build runs without cache.
         required: false
         type: string
         default: /home/gha-runner/buildx-cache
@@ -123,17 +124,29 @@ jobs:
 
       # Cache local du runner : les layers restent sur le disque de la box, rien ne transite
       # par le cache réseau de GitHub. Un sous-dossier par repo évite les collisions.
+      # Hors runner self-hosted la machine est jetable : le répertoire naîtrait vide et
+      # mourrait avec la VM, donc on ne produit aucune option de cache et le build s'en passe.
       - name: Resolve buildx cache directory
         id: cache
         env:
           CACHE_ROOT: ${{ inputs.buildx_cache_dir }}
           REPOSITORY: ${{ github.repository }}
+          RUNNER_ENVIRONMENT: ${{ runner.environment }}
         run: |
+          if [ "$RUNNER_ENVIRONMENT" != "self-hosted" ]; then
+            echo "Runner $RUNNER_ENVIRONMENT : build sans cache local."
+            exit 0
+          fi
+
           slug="${REPOSITORY//\//-}"
           dir="${CACHE_ROOT}/${slug,,}"
           mkdir -p "$dir"
-          echo "dir=${dir}" >> "$GITHUB_OUTPUT"
-          echo "scratch=${dir}-new" >> "$GITHUB_OUTPUT"
+          {
+            echo "dir=${dir}"
+            echo "scratch=${dir}-new"
+            echo "cache_from=type=local,src=${dir}"
+            echo "cache_to=type=local,dest=${dir}-new,mode=max"
+          } >> "$GITHUB_OUTPUT"
 
       - uses: docker/setup-buildx-action@v3
 
@@ -167,8 +180,8 @@ jobs:
           load: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=local,src=${{ steps.cache.outputs.dir }}
-          cache-to: type=local,dest=${{ steps.cache.outputs.scratch }},mode=max
+          cache-from: ${{ steps.cache.outputs.cache_from }}
+          cache-to: ${{ steps.cache.outputs.cache_to }}
           provenance: false
           sbom: false
           # Monté via RUN --mount=type=secret,id=npm_token dans les Dockerfiles ;
@@ -252,7 +265,7 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=local,src=${{ steps.cache.outputs.dir }}
+          cache-from: ${{ steps.cache.outputs.cache_from }}
           provenance: true
           sbom: true
           secrets: |
