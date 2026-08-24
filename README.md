@@ -9,7 +9,7 @@ Application repositories should call reusable workflows by release tag:
 ```yaml
 jobs:
   ci:
-    uses: DaVinciBot/shared-workflows/.github/workflows/ci.yml@v7.0.2
+    uses: DaVinciBot/shared-workflows/.github/workflows/ci.yml@v7.1.0
 ```
 
 Available workflows:
@@ -59,7 +59,7 @@ repository tunes its own thresholds without touching this repository:
 Required repository or organization setup:
 
 - Allow application repositories to use reusable workflows from `DaVinciBot/shared-workflows`.
-- Create and maintain version tags such as `v7.0.2` after changes are reviewed.
+- Create and maintain version tags such as `v7.1.0` after changes are reviewed.
 - Grant GitHub Actions `packages: write` for workflows that publish to GHCR.
 - Grant GitHub Actions `id-token: write` for workflows that create keyless Cosign and npm signatures.
 - Configure deployment environments `dev`, `staging`, and `prod` in application repositories, with a required reviewer
@@ -77,8 +77,11 @@ Required repository or organization setup:
 
 ## Self-hosted runner
 
-Every job runs on `runs-on: [self-hosted, helsinki]` — a single persistent organisation runner, co-located with
-production, so one job runs at a time and the whole file set is written for that. Consequences worth keeping in mind:
+Every workflow takes a `runner` input — a JSON array of labels, defaulting to `'["self-hosted", "helsinki"]'` — and
+resolves it with `runs-on: ${{ fromJSON(inputs.runner) }}`. Callers leave it alone and land on the single persistent
+organisation runner, co-located with production, so one job runs at a time and the whole file set is written for that.
+Pass `runner: '["ubuntu-latest"]'` from a caller for the rare job that really needs a GitHub-hosted VM. Consequences
+worth keeping in mind:
 
 - The runner is **not** a GitHub-hosted image. Node and pnpm are set up explicitly by the workflows that need them; do
   not add a step that assumes the toolchain a GitHub-hosted image would have preinstalled.

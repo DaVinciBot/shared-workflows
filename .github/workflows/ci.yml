@@ -3,6 +3,14 @@ name: Shared CI
 on:
   workflow_call:
     inputs:
+      runner:
+        description: >-
+          Runner the jobs run on, as a JSON array of labels. Defaults to the self-hosted runner of the
+          organisation in Helsinki; pass another array, such as '["ubuntu-latest"]', for a job that
+          really needs a GitHub-hosted VM.
+        required: false
+        type: string
+        default: '["self-hosted", "helsinki"]'
       pnpm_version:
         description: pnpm version to install.
         required: false
@@ -41,7 +49,7 @@ permissions:
 jobs:
   quality-gates:
     name: ${{ matrix.name }}
-    runs-on: [self-hosted, helsinki]
+    runs-on: ${{ fromJSON(inputs.runner) }}
     timeout-minutes: 20
     strategy:
       fail-fast: false

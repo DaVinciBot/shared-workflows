@@ -9,6 +9,14 @@ name: Shared Publish npm
 on:
   workflow_call:
     inputs:
+      runner:
+        description: >-
+          Runner the jobs run on, as a JSON array of labels. Defaults to the self-hosted runner of the
+          organisation in Helsinki; pass another array, such as '["ubuntu-latest"]', for a job that
+          really needs a GitHub-hosted VM.
+        required: false
+        type: string
+        default: '["self-hosted", "helsinki"]'
       package_dir:
         description: Directory containing the package.json to publish.
         required: false
@@ -41,7 +49,7 @@ permissions:
 jobs:
   publish:
     name: Publish ${{ inputs.package_dir }}
-    runs-on: [self-hosted, helsinki]
+    runs-on: ${{ fromJSON(inputs.runner) }}
     timeout-minutes: 15
     env:
       NPM_TOKEN: ${{ secrets.PACKAGES_READ_TOKEN || github.token }}

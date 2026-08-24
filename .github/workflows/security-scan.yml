@@ -3,6 +3,14 @@ name: Shared Security Scan
 on:
   workflow_call:
     inputs:
+      runner:
+        description: >-
+          Runner the jobs run on, as a JSON array of labels. Defaults to the self-hosted runner of the
+          organisation in Helsinki; pass another array, such as '["ubuntu-latest"]', for a job that
+          really needs a GitHub-hosted VM.
+        required: false
+        type: string
+        default: '["self-hosted", "helsinki"]'
       fs_gate_severity:
         description: Severity gate for repository vulnerability scan.
         required: false
@@ -33,7 +41,7 @@ jobs:
   dependency-review:
     name: Dependency Review
     if: github.event_name == 'pull_request'
-    runs-on: [self-hosted, helsinki]
+    runs-on: ${{ fromJSON(inputs.runner) }}
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
@@ -44,7 +52,7 @@ jobs:
 
   trivy-fs:
     name: Trivy FS
-    runs-on: [self-hosted, helsinki]
+    runs-on: ${{ fromJSON(inputs.runner) }}
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
@@ -82,7 +90,7 @@ jobs:
 
   checkov:
     name: Checkov
-    runs-on: [self-hosted, helsinki]
+    runs-on: ${{ fromJSON(inputs.runner) }}
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
