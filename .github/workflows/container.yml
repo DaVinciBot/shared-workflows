@@ -64,7 +64,7 @@ on:
           share a cache. Kept bounded by writing to a scratch directory and swapping it in after the build.
         required: false
         type: string
-        default: /opt/buildx-cache
+        default: /home/gha-runner/buildx-cache
     secrets:
       PACKAGES_READ_TOKEN:
         description: Token with read:packages, mounted as build secret to install private @davincibot packages inside the image build.
@@ -168,7 +168,7 @@ jobs:
           secrets: |
             npm_token=${{ secrets.PACKAGES_READ_TOKEN }}
 
-      # buildx n'expire jamais un cache local : sans rotation /opt/buildx-cache grossit
+      # buildx n'expire jamais un cache local : sans rotation /home/gha-runner/buildx-cache grossit
       # sans limite. On écrit dans un scratch puis on remplace, ce qui borne la taille
       # à une génération de layers au lieu de toutes les cumuler.
       - name: Rotate buildx cache

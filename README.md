@@ -9,7 +9,7 @@ Application repositories should call reusable workflows by release tag:
 ```yaml
 jobs:
   ci:
-    uses: DaVinciBot/shared-workflows/.github/workflows/ci.yml@v7.0.1
+    uses: DaVinciBot/shared-workflows/.github/workflows/ci.yml@v7.0.2
 ```
 
 Available workflows:
@@ -28,9 +28,9 @@ Available workflows:
   image is the one that was inspected, and it carries the provenance and SBOM attestations the local build cannot
   export. Inputs pin each tool and point at its config: `hadolint_version`/`hadolint_config`,
   `dive_version`/`dive_config`, `dockle_version`/`dockle_exit_level`, `trivy_severity`,
-  `buildx_cache_dir`. Layer caching is local to the runner (`type=local` under `/opt/buildx-cache/<owner>-<repo>`,
-  `mode=max`), not `type=gha`: on a self-hosted runner the layers stay on the box instead of round-tripping to GitHub's
-  cache service.
+  `buildx_cache_dir`. Layer caching is local to the runner (`type=local` under
+  `/home/gha-runner/buildx-cache/<owner>-<repo>`, `mode=max`), not `type=gha`: on a self-hosted runner the layers stay
+  on the box instead of round-tripping to GitHub's cache service.
 - `.github/workflows/deploy.yml`: deploy applications through Dokploy.
 - `.github/workflows/e2e.yml`: run Playwright end-to-end tests. Input `playwright_install_deps` (default `false`)
   controls `playwright install --with-deps`; it is off because the runner shares its host with production and
@@ -59,7 +59,7 @@ repository tunes its own thresholds without touching this repository:
 Required repository or organization setup:
 
 - Allow application repositories to use reusable workflows from `DaVinciBot/shared-workflows`.
-- Create and maintain version tags such as `v7.0.1` after changes are reviewed.
+- Create and maintain version tags such as `v7.0.2` after changes are reviewed.
 - Grant GitHub Actions `packages: write` for workflows that publish to GHCR.
 - Grant GitHub Actions `id-token: write` for workflows that create keyless Cosign and npm signatures.
 - Configure deployment environments `dev`, `staging`, and `prod` in application repositories, with a required reviewer
@@ -82,10 +82,10 @@ production, so one job runs at a time and the whole file set is written for that
 
 - The runner is **not** a GitHub-hosted image. Node and pnpm are set up explicitly by the workflows that need them; do
   not add a step that assumes the toolchain a GitHub-hosted image would have preinstalled.
-- `/opt/buildx-cache` is **not** touched by the host's daily `docker system prune`. `container.yml` keeps it bounded by
-  writing each build to `<dir>-new` and swapping it in, so a repository holds one generation of layers rather than
-  accumulating all of them. If the directory still grows past what the box can spare, move that repository to a registry
-  cache (`type=registry` against a `:buildcache` tag on GHCR) rather than adding a prune step here.
+- `/home/gha-runner/buildx-cache` is **not** touched by the host's daily `docker system prune`. `container.yml` keeps it
+  bounded by writing each build to `<dir>-new` and swapping it in, so a repository holds one generation of layers rather
+  than accumulating all of them. If the directory still grows past what the box can spare, move that repository to a
+  registry cache (`type=registry` against a `:buildcache` tag on GHCR) rather than adding a prune step here.
 - The per-repository subdirectory exists because a second runner on the same host writing the same local cache
   concurrently can corrupt it. Adding a runner means either keeping one cache root per runner or moving to a registry
   cache.
