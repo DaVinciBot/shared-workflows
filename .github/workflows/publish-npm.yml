@@ -1,7 +1,9 @@
 name: Shared Publish npm
 
 # Publie un package npm sur GitHub Packages (npm.pkg.github.com).
-# Idempotent : si la version du package.json est déjà publiée, le job réussit sans rien faire.
+# Idempotent : la version du package.json est confrontée au registre avant toute
+# autre étape, et si elle est déjà publiée le job s'arrête là — ni pnpm, ni
+# install, ni build ne sont exécutés.
 # La publication utilise le GITHUB_TOKEN du repo appelant (packages: write) ;
 # PACKAGES_READ_TOKEN n'est requis que pour installer des dépendances @davincibot
 # publiées depuis d'autres repos.
@@ -33,10 +35,27 @@ on:
         type: string
         default: .nvmrc
       build_command:
-        description: Optional build command run in package_dir before publishing.
+        description: >-
+          Optional build command run in package_dir before publishing. When empty the install is skipped
+          entirely: pnpm resolves the workspace: protocol from the workspace manifests, not from node_modules.
         required: false
         type: string
         default: ''
+      install_filter:
+        description: >-
+          pnpm filter limiting the install to one workspace package and its workspace dependencies
+          (a trailing '...' is appended). Empty installs the whole workspace.
+        required: false
+        type: string
+        default: ''
+      pnpm_store_dir:
+        description: >-
+          Persistent pnpm store on the self-hosted runner, shared by every repository — the store is
+          content-addressed, so sharing it is what it is for. Ignored on a GitHub-hosted runner, where the
+          store dies with the VM and setup-node caches it through GitHub instead.
+        required: false
+        type: string
+        default: /home/gha-runner/pnpm-store
     secrets:
       PACKAGES_READ_TOKEN:
         description: Token with read:packages, needed only to install private @davincibot dependencies from other repos.
@@ -56,38 +75,89 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: pnpm/action-setup@v6
-        with:
-          version: ${{ inputs.pnpm_version }}
-          standalone: true
-
       - uses: actions/setup-node@v7
         with:
           node-version-file: ${{ inputs.node_version_file }}
           registry-url: https://npm.pkg.github.com
           scope: '@davincibot'
 
-      - name: Install dependencies
-        if: ${{ hashFiles('pnpm-lock.yaml') != '' }}
-        run: pnpm install --frozen-lockfile
-
-      - name: Build
-        if: ${{ inputs.build_command != '' }}
-        working-directory: ${{ inputs.package_dir }}
-        run: ${{ inputs.build_command }}
-
-      - name: Publish if version not already published
+      # Première étape utile du job : tout ce qui suit est sauté quand la version
+      # est déjà sur le registre. Un échec de `npm view` qui n'est pas un 404 est
+      # une erreur du registre, pas une absence de version : on s'arrête plutôt
+      # que de partir sur un build qui finira en 409 à la publication.
+      - name: Check registry for this version
+        id: registry
         working-directory: ${{ inputs.package_dir }}
         env:
-          # La publication et le npm view utilisent le token du repo (packages: write),
-          # pas le token de lecture : un read token ne peut pas publier.
+          # Le token du repo (packages: write), pas le read token : la même
+          # authentification servira à publier.
           NPM_TOKEN: ${{ github.token }}
           NODE_AUTH_TOKEN: ${{ github.token }}
         run: |
-          VERSION=$(node -p "require('./package.json').version")
-          PKG=$(node -p "require('./package.json').name")
-          if npm view "${PKG}@${VERSION}" version 2>/dev/null; then
-            echo "Version ${VERSION} already published, skipping"
+          set -euo pipefail
+          name=$(node -p "require('./package.json').name")
+          version=$(node -p "require('./package.json').version")
+          if view=$(npm view "${name}@${version}" version 2>&1); then
+            echo "published=true" >> "$GITHUB_OUTPUT"
+            echo "\`${name}@${version}\` est déjà publié — rien à faire." >> "$GITHUB_STEP_SUMMARY"
+          elif printf '%s' "$view" | grep -q 'E404'; then
+            echo "published=false" >> "$GITHUB_OUTPUT"
+            echo "\`${name}@${version}\` n'est pas encore publié." >> "$GITHUB_STEP_SUMMARY"
           else
-            pnpm publish --no-git-checks
+            printf '%s\n' "$view"
+            echo "::error::npm view ${name}@${version} a échoué sans 404 — registre injoignable ou token invalide."
+            exit 1
           fi
+
+      - uses: pnpm/action-setup@v6
+        if: steps.registry.outputs.published == 'false'
+        with:
+          version: ${{ inputs.pnpm_version }}
+          standalone: true
+
+      - name: Resolve pnpm store
+        id: store
+        if: ${{ steps.registry.outputs.published == 'false' && inputs.build_command != '' }}
+        env:
+          STORE_ROOT: ${{ inputs.pnpm_store_dir }}
+          RUNNER_ENVIRONMENT: ${{ runner.environment }}
+        run: |
+          set -euo pipefail
+          if [ "$RUNNER_ENVIRONMENT" != "self-hosted" ]; then
+            echo "Runner $RUNNER_ENVIRONMENT : store jetable, install sans store persistant."
+            exit 0
+          fi
+          mkdir -p "$STORE_ROOT"
+          echo "dir=${STORE_ROOT}" >> "$GITHUB_OUTPUT"
+
+      # Sans build_command il n'y a rien à compiler et `pnpm publish` n'a pas besoin
+      # de node_modules : le protocole workspace: est résolu depuis les manifests du
+      # workspace. On saute donc l'install pour les packages sans étape de build.
+      - name: Install dependencies
+        if: ${{ steps.registry.outputs.published == 'false' && inputs.build_command != '' && hashFiles('pnpm-lock.yaml') != '' }}
+        env:
+          STORE_DIR: ${{ steps.store.outputs.dir }}
+          INSTALL_FILTER: ${{ inputs.install_filter }}
+        run: |
+          set -euo pipefail
+          args=(install --frozen-lockfile)
+          if [ -n "${STORE_DIR:-}" ]; then
+            args+=(--store-dir "$STORE_DIR")
+          fi
+          if [ -n "${INSTALL_FILTER:-}" ]; then
+            args+=(--filter "${INSTALL_FILTER}...")
+          fi
+          pnpm "${args[@]}"
+
+      - name: Build
+        if: ${{ steps.registry.outputs.published == 'false' && inputs.build_command != '' }}
+        working-directory: ${{ inputs.package_dir }}
+        run: ${{ inputs.build_command }}
+
+      - name: Publish
+        if: steps.registry.outputs.published == 'false'
+        working-directory: ${{ inputs.package_dir }}
+        env:
+          NPM_TOKEN: ${{ github.token }}
+          NODE_AUTH_TOKEN: ${{ github.token }}
+        run: pnpm publish --no-git-checks

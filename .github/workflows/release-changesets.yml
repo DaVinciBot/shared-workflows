@@ -21,6 +21,14 @@ on:
         required: false
         type: string
         default: .nvmrc
+      pnpm_store_dir:
+        description: >-
+          Persistent pnpm store on the self-hosted runner, shared by every repository — the store is
+          content-addressed, so sharing it is what it is for. Ignored on a GitHub-hosted runner, where the
+          store dies with the VM.
+        required: false
+        type: string
+        default: /home/gha-runner/pnpm-store
       version_script:
         description: Command run by changesets to apply the changesets and bump versions.
         required: false
@@ -62,10 +70,35 @@ jobs:
         with:
           node-version-file: ${{ inputs.node_version_file }}
 
+      # Le store pnpm survit aux jobs sur la box : le garder à demeure évite de
+      # retélécharger le workspace à chaque « Version Packages ».
+      - name: Resolve pnpm store
+        id: store
+        env:
+          STORE_ROOT: ${{ inputs.pnpm_store_dir }}
+          RUNNER_ENVIRONMENT: ${{ runner.environment }}
+        run: |
+          set -euo pipefail
+          if [ "$RUNNER_ENVIRONMENT" != "self-hosted" ]; then
+            echo "Runner $RUNNER_ENVIRONMENT : store jetable."
+            exit 0
+          fi
+          mkdir -p "$STORE_ROOT"
+          echo "dir=${STORE_ROOT}" >> "$GITHUB_OUTPUT"
+
+      # `changeset version` ne fait que réécrire des package.json et des CHANGELOG :
+      # aucun script de cycle de vie n'est nécessaire pour ça.
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
         env:
           NPM_TOKEN: ${{ secrets.PACKAGES_READ_TOKEN }}
+          STORE_DIR: ${{ steps.store.outputs.dir }}
+        run: |
+          set -euo pipefail
+          args=(install --frozen-lockfile --ignore-scripts)
+          if [ -n "${STORE_DIR:-}" ]; then
+            args+=(--store-dir "$STORE_DIR")
+          fi
+          pnpm "${args[@]}"
 
       - uses: changesets/action@v2
         with:

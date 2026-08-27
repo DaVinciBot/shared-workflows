@@ -29,6 +29,21 @@ on:
         required: false
         type: string
         default: '.'
+      pnpm_store_dir:
+        description: >-
+          Persistent pnpm store on the self-hosted runner, shared by every repository — the store is
+          content-addressed, so sharing it is what it is for. Ignored on a GitHub-hosted runner, where the
+          store dies with the VM and setup-node caches it through GitHub instead.
+        required: false
+        type: string
+        default: /home/gha-runner/pnpm-store
+      install_filter:
+        description: >-
+          pnpm filter limiting the install to one workspace package and its workspace dependencies
+          (a trailing '...' is appended). Empty installs the whole workspace.
+        required: false
+        type: string
+        default: ''
       commands:
         description: >-
           JSON array of {name, command} objects to run as the quality-gate
@@ -66,12 +81,40 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version-file: ${{ inputs.node_version_file }}
-          cache: pnpm
+          cache: ${{ runner.environment == 'self-hosted' && '' || 'pnpm' }}
+
+      # Le store pnpm survit aux jobs sur la box : le cache réseau de GitHub ferait
+      # un aller-retour de tarball par run pour un contenu déjà sur le disque. On le
+      # laisse donc à setup-node uniquement quand le runner est jetable.
+      - name: Resolve pnpm store
+        id: store
+        env:
+          STORE_ROOT: ${{ inputs.pnpm_store_dir }}
+          RUNNER_ENVIRONMENT: ${{ runner.environment }}
+        run: |
+          set -euo pipefail
+          if [ "$RUNNER_ENVIRONMENT" != "self-hosted" ]; then
+            echo "Runner $RUNNER_ENVIRONMENT : store jetable, cache GitHub."
+            exit 0
+          fi
+          mkdir -p "$STORE_ROOT"
+          echo "dir=${STORE_ROOT}" >> "$GITHUB_OUTPUT"
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
         env:
           NPM_TOKEN: ${{ secrets.PACKAGES_READ_TOKEN }}
+          STORE_DIR: ${{ steps.store.outputs.dir }}
+          INSTALL_FILTER: ${{ inputs.install_filter }}
+        run: |
+          set -euo pipefail
+          args=(install --frozen-lockfile)
+          if [ -n "${STORE_DIR:-}" ]; then
+            args+=(--store-dir "$STORE_DIR")
+          fi
+          if [ -n "${INSTALL_FILTER:-}" ]; then
+            args+=(--filter "${INSTALL_FILTER}...")
+          fi
+          pnpm "${args[@]}"
 
       - name: Run ${{ matrix.name }}
         run: ${{ matrix.command }}

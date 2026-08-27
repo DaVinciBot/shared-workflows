@@ -36,6 +36,14 @@ on:
         required: false
         type: string
         default: CRITICAL
+      trivy_cache_dir:
+        description: >-
+          Persistent Trivy cache on the self-hosted runner. The vulnerability database weighs several hundred
+          megabytes and is re-downloaded on every run without it. Ignored on a GitHub-hosted runner, where the
+          directory would die with the VM and the action caches the database through GitHub instead.
+        required: false
+        type: string
+        default: /home/gha-runner/trivy-cache
       hadolint_version:
         description: hadolint image tag used to lint the Dockerfile.
         required: false
@@ -245,6 +253,23 @@ jobs:
             "$DOCKLE_IMAGE" \
             --no-color --exit-code 1 --exit-level "$DOCKLE_EXIT_LEVEL" "$IMAGE_REF"
 
+      # La base Trivy vit sur le disque de la box et sert tous les repos : un run
+      # ne la retélécharge plus, et les deux scans du job la partagent.
+      - name: Resolve Trivy cache directory
+        id: trivy_cache
+        env:
+          CACHE_ROOT: ${{ inputs.trivy_cache_dir }}
+          RUNNER_ENVIRONMENT: ${{ runner.environment }}
+        run: |
+          set -euo pipefail
+          if [ "$RUNNER_ENVIRONMENT" != "self-hosted" ]; then
+            echo "Runner $RUNNER_ENVIRONMENT : cache Trivy jetable, cache GitHub."
+            exit 0
+          fi
+          mkdir -p "$CACHE_ROOT"
+          echo "TRIVY_CACHE_DIR=${CACHE_ROOT}" >> "$GITHUB_ENV"
+          echo "local=true" >> "$GITHUB_OUTPUT"
+
       - name: Scan image
         uses: aquasecurity/trivy-action@v0.36.0
         with:
@@ -254,6 +279,7 @@ jobs:
           severity: ${{ inputs.trivy_severity }}
           ignore-unfixed: true
           exit-code: '1'
+          cache: ${{ steps.trivy_cache.outputs.local == 'true' && 'false' || 'true' }}
 
       - name: Publish image
         id: publish

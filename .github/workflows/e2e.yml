@@ -21,6 +21,14 @@ on:
         required: false
         type: string
         default: .nvmrc
+      pnpm_store_dir:
+        description: >-
+          Persistent pnpm store on the self-hosted runner, shared by every repository — the store is
+          content-addressed, so sharing it is what it is for. Ignored on a GitHub-hosted runner, where the
+          store dies with the VM and setup-node caches it through GitHub instead.
+        required: false
+        type: string
+        default: /home/gha-runner/pnpm-store
       e2e_command:
         description: E2E command.
         required: false
@@ -58,12 +66,36 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version-file: ${{ inputs.node_version_file }}
-          cache: pnpm
+          cache: ${{ runner.environment == 'self-hosted' && '' || 'pnpm' }}
+
+      # Le store pnpm survit aux jobs sur la box : le cache réseau de GitHub ferait
+      # un aller-retour de tarball par run pour un contenu déjà sur le disque. On le
+      # laisse donc à setup-node uniquement quand le runner est jetable.
+      - name: Resolve pnpm store
+        id: store
+        env:
+          STORE_ROOT: ${{ inputs.pnpm_store_dir }}
+          RUNNER_ENVIRONMENT: ${{ runner.environment }}
+        run: |
+          set -euo pipefail
+          if [ "$RUNNER_ENVIRONMENT" != "self-hosted" ]; then
+            echo "Runner $RUNNER_ENVIRONMENT : store jetable, cache GitHub."
+            exit 0
+          fi
+          mkdir -p "$STORE_ROOT"
+          echo "dir=${STORE_ROOT}" >> "$GITHUB_OUTPUT"
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
         env:
           NPM_TOKEN: ${{ secrets.PACKAGES_READ_TOKEN }}
+          STORE_DIR: ${{ steps.store.outputs.dir }}
+        run: |
+          set -euo pipefail
+          args=(install --frozen-lockfile)
+          if [ -n "${STORE_DIR:-}" ]; then
+            args+=(--store-dir "$STORE_DIR")
+          fi
+          pnpm "${args[@]}"
 
       - name: Install Playwright browsers
         env:
