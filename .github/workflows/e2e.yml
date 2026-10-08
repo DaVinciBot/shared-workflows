@@ -3,6 +3,14 @@ name: Shared E2E
 on:
   workflow_call:
     inputs:
+      runner:
+        description: >-
+          Runner the jobs run on, as a JSON array of labels. Defaults to the self-hosted runner of the
+          organisation in Helsinki; pass another array, such as '["ubuntu-latest"]', for a job that
+          really needs a GitHub-hosted VM.
+        required: false
+        type: string
+        default: '["self-hosted", "helsinki"]'
       pnpm_version:
         description: pnpm version to install.
         required: false
@@ -13,17 +21,30 @@ on:
         required: false
         type: string
         default: .nvmrc
+      pnpm_store_dir:
+        description: >-
+          Persistent pnpm store on the self-hosted runner, shared by every repository — the store is
+          content-addressed, so sharing it is what it is for. Ignored on a GitHub-hosted runner, where the
+          store dies with the VM and setup-node caches it through GitHub instead.
+        required: false
+        type: string
+        default: /home/gha-runner/pnpm-store
       e2e_command:
         description: E2E command.
         required: false
         type: string
         default: pnpm test:e2e
+      playwright_install_deps:
+        description: >-
+          Install the Playwright system libraries with apt on every run. Off by default: the self-hosted runner shares
+          its host with production, and --with-deps needs passwordless sudo and mutates that host at each run. The
+          libraries are a one-off host setup instead; the browsers themselves persist in the runner cache.
+        required: false
+        type: boolean
+        default: false
     secrets:
-      NIXPACKS_NODE_VERSION:
-        required: false
-      PUBLIC_SUPABASE_URL:
-        required: false
-      PUBLIC_SUPABASE_PUBLISHABLE_KEY:
+      PACKAGES_READ_TOKEN:
+        description: Token with read:packages used to install private @davincibot packages.
         required: false
 
 permissions:
@@ -32,38 +53,66 @@ permissions:
 jobs:
   e2e:
     name: E2E Tests
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(inputs.runner) }}
     timeout-minutes: 30
-    env:
-      NIXPACKS_NODE_VERSION: ${{ secrets.NIXPACKS_NODE_VERSION || '22' }}
-      PUBLIC_SUPABASE_URL: ${{ secrets.PUBLIC_SUPABASE_URL || 'https://project.supabase.co' }}
-      PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.PUBLIC_SUPABASE_PUBLISHABLE_KEY || 'local-anon-key' }}
     steps:
-      - uses: actions/checkout@v6
-        with:
-          submodules: recursive
+      - uses: actions/checkout@v7
 
       - uses: pnpm/action-setup@v6
         with:
           version: ${{ inputs.pnpm_version }}
+          standalone: true
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version-file: ${{ inputs.node_version_file }}
-          cache: pnpm
+          cache: ${{ runner.environment == 'self-hosted' && '' || 'pnpm' }}
+
+      # Le store pnpm survit aux jobs sur la box : le cache réseau de GitHub ferait
+      # un aller-retour de tarball par run pour un contenu déjà sur le disque. On le
+      # laisse donc à setup-node uniquement quand le runner est jetable.
+      - name: Resolve pnpm store
+        id: store
+        env:
+          STORE_ROOT: ${{ inputs.pnpm_store_dir }}
+          RUNNER_ENVIRONMENT: ${{ runner.environment }}
+        run: |
+          set -euo pipefail
+          if [ "$RUNNER_ENVIRONMENT" != "self-hosted" ]; then
+            echo "Runner $RUNNER_ENVIRONMENT : store jetable, cache GitHub."
+            exit 0
+          fi
+          mkdir -p "$STORE_ROOT"
+          echo "dir=${STORE_ROOT}" >> "$GITHUB_OUTPUT"
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        env:
+          NPM_TOKEN: ${{ secrets.PACKAGES_READ_TOKEN }}
+          STORE_DIR: ${{ steps.store.outputs.dir }}
+        run: |
+          set -euo pipefail
+          args=(install --frozen-lockfile)
+          if [ -n "${STORE_DIR:-}" ]; then
+            args+=(--store-dir "$STORE_DIR")
+          fi
+          pnpm "${args[@]}"
 
       - name: Install Playwright browsers
-        run: pnpm exec playwright install --with-deps
+        env:
+          WITH_DEPS: ${{ inputs.playwright_install_deps }}
+        run: |
+          if [ "$WITH_DEPS" = "true" ]; then
+            pnpm exec playwright install --with-deps
+          else
+            pnpm exec playwright install
+          fi
 
       - name: Run e2e tests
         run: ${{ inputs.e2e_command }}
 
       - name: Upload Playwright report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: playwright-report
           path: |

@@ -1,0 +1,7 @@
+# CODEOWNERS — shared-workflows
+
+# Ce repo pilote la CI/CD de tous les sites : toute modification est sensible
+
+# Une review du lead est requise sur l'ensemble du repo (branch protection)
+
+*                       @aust-1

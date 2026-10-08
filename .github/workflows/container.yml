@@ -3,6 +3,14 @@ name: Shared Container
 on:
   workflow_call:
     inputs:
+      runner:
+        description: >-
+          Runner the jobs run on, as a JSON array of labels. Defaults to the self-hosted runner of the
+          organisation in Helsinki; pass another array, such as '["ubuntu-latest"]', for a job that
+          really needs a GitHub-hosted VM.
+        required: false
+        type: string
+        default: '["self-hosted", "helsinki"]'
       push:
         description: Push the image to GHCR.
         required: false
@@ -24,13 +32,63 @@ on:
         type: string
         default: ./Dockerfile
       trivy_severity:
-        description: Severity gate for the published image scan.
+        description: Severity gate for the image scan.
         required: false
         type: string
         default: CRITICAL
+      trivy_cache_dir:
+        description: >-
+          Persistent Trivy cache on the self-hosted runner. The vulnerability database weighs several hundred
+          megabytes and is re-downloaded on every run without it. Ignored on a GitHub-hosted runner, where the
+          directory would die with the VM and the action caches the database through GitHub instead.
+        required: false
+        type: string
+        default: /home/gha-runner/trivy-cache
+      hadolint_version:
+        description: hadolint image tag used to lint the Dockerfile.
+        required: false
+        type: string
+        default: v2.14.0
+      hadolint_config:
+        description: hadolint configuration, relative to the repository root. Owns the failure threshold and the ignored rules.
+        required: false
+        type: string
+        default: .hadolint.yaml
+      dive_version:
+        description: dive image tag used to analyse image layers.
+        required: false
+        type: string
+        default: v0.13.1
+      dive_config:
+        description: dive CI rules file, relative to the repository root. Owns the efficiency and wasted-bytes thresholds.
+        required: false
+        type: string
+        default: .dive-ci
+      dockle_version:
+        description: dockle image tag used to lint the built image.
+        required: false
+        type: string
+        default: v0.4.15
+      dockle_exit_level:
+        description: dockle severity that fails the job (INFO, WARN, FATAL). Individual checkpoints are waived through .dockleignore.
+        required: false
+        type: string
+        default: WARN
+      buildx_cache_dir:
+        description: >-
+          Root of the buildx local cache on the self-hosted runner. One subdirectory per repository, so two repos never
+          share a cache. Kept bounded by writing to a scratch directory and swapping it in after the build. Ignored on a
+          GitHub-hosted runner, where the build runs without cache.
+        required: false
+        type: string
+        default: /home/gha-runner/buildx-cache
+    secrets:
+      PACKAGES_READ_TOKEN:
+        description: Token with read:packages, mounted as build secret to install private @davincibot packages inside the image build.
+        required: true
     outputs:
       image:
-        description: Image name.
+        description: Image name (without tag).
         value: ${{ jobs.container.outputs.image }}
       digest:
         description: Published image digest.
@@ -45,23 +103,58 @@ permissions:
 jobs:
   container:
     name: Container Image
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(inputs.runner) }}
     timeout-minutes: 35
     outputs:
       image: ${{ steps.export.outputs.image }}
       digest: ${{ steps.export.outputs.digest }}
     steps:
-      - uses: actions/checkout@v6
-        with:
-          submodules: recursive
+      - uses: actions/checkout@v7
+
+      - name: Lint Dockerfile
+        env:
+          HADOLINT_IMAGE: hadolint/hadolint:${{ inputs.hadolint_version }}
+          HADOLINT_CONFIG: ${{ inputs.hadolint_config }}
+          DOCKERFILE: ${{ inputs.dockerfile }}
+        run: |
+          docker run --rm \
+            -v "${PWD}:/repo:ro" -w /repo \
+            "$HADOLINT_IMAGE" \
+            hadolint --no-color --config "$HADOLINT_CONFIG" "$DOCKERFILE"
 
       - name: Set image name
+        env:
+          INPUT_IMAGE_NAME: ${{ inputs.image_name }}
+          REPOSITORY: ${{ github.repository }}
         run: |
-          IMAGE_NAME="${{ inputs.image_name }}"
-          if [ -z "$IMAGE_NAME" ]; then
-            IMAGE_NAME="ghcr.io/${{ github.repository }}"
-          fi
+          IMAGE_NAME="${INPUT_IMAGE_NAME:-ghcr.io/${REPOSITORY}}"
           echo "IMAGE_NAME=${IMAGE_NAME,,}" >> "$GITHUB_ENV"
+
+      # Cache local du runner : les layers restent sur le disque de la box, rien ne transite
+      # par le cache réseau de GitHub. Un sous-dossier par repo évite les collisions.
+      # Hors runner self-hosted la machine est jetable : le répertoire naîtrait vide et
+      # mourrait avec la VM, donc on ne produit aucune option de cache et le build s'en passe.
+      - name: Resolve buildx cache directory
+        id: cache
+        env:
+          CACHE_ROOT: ${{ inputs.buildx_cache_dir }}
+          REPOSITORY: ${{ github.repository }}
+          RUNNER_ENVIRONMENT: ${{ runner.environment }}
+        run: |
+          if [ "$RUNNER_ENVIRONMENT" != "self-hosted" ]; then
+            echo "Runner $RUNNER_ENVIRONMENT : build sans cache local."
+            exit 0
+          fi
+
+          slug="${REPOSITORY//\//-}"
+          dir="${CACHE_ROOT}/${slug,,}"
+          mkdir -p "$dir"
+          {
+            echo "dir=${dir}"
+            echo "scratch=${dir}-new"
+            echo "cache_from=type=local,src=${dir}"
+            echo "cache_to=type=local,dest=${dir}-new,mode=max"
+          } >> "$GITHUB_OUTPUT"
 
       - uses: docker/setup-buildx-action@v4
 
@@ -73,6 +166,9 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ github.token }}
 
+      # Contrat de tags : exactement deux par commit poussé.
+      #   sha-<commit long>  -> traçabilité et rollback
+      #   <branche>          -> dev | staging | main, consommé par Watchtower
       - name: Extract Docker metadata
         id: meta
         uses: docker/metadata-action@v6
@@ -81,8 +177,6 @@ jobs:
           tags: |
             type=sha,format=long,prefix=sha-
             type=ref,event=branch
-            type=ref,event=tag
-            type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Build image
         id: build
@@ -90,18 +184,123 @@ jobs:
         with:
           context: ${{ inputs.context }}
           file: ${{ inputs.dockerfile }}
-          push: ${{ inputs.push }}
+          push: false
+          load: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          provenance: ${{ inputs.push }}
-          sbom: ${{ inputs.push }}
+          cache-from: ${{ steps.cache.outputs.cache_from }}
+          cache-to: ${{ steps.cache.outputs.cache_to }}
+          provenance: false
+          sbom: false
+          # Monté via RUN --mount=type=secret,id=npm_token dans les Dockerfiles ;
+          # jamais présent dans une layer de l'image.
+          secrets: |
+            npm_token=${{ secrets.PACKAGES_READ_TOKEN }}
+
+      # buildx n'expire jamais un cache local : sans rotation /home/gha-runner/buildx-cache grossit
+      # sans limite. On écrit dans un scratch puis on remplace, ce qui borne la taille
+      # à une génération de layers au lieu de toutes les cumuler.
+      - name: Rotate buildx cache
+        if: always() && steps.cache.outputs.scratch != ''
+        env:
+          CACHE_DIR: ${{ steps.cache.outputs.dir }}
+          CACHE_SCRATCH: ${{ steps.cache.outputs.scratch }}
+        run: |
+          if [ -d "$CACHE_SCRATCH" ]; then
+            rm -rf "$CACHE_DIR"
+            mv "$CACHE_SCRATCH" "$CACHE_DIR"
+          fi
+          du -sh "$CACHE_DIR" 2>/dev/null || true
+
+      - name: Resolve image reference
+        id: ref
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          REF="$(printf '%s\n' "$TAGS" | grep -m1 ':sha-' || true)"
+
+          if [ -z "$REF" ]; then
+            REF="$(printf '%s\n' "$TAGS" | head -n 1)"
+          fi
+
+          if [ -z "$REF" ]; then
+            echo "::error::aucune image à inspecter (tags vides)"
+            exit 1
+          fi
+
+          echo "ref=${REF}" >> "$GITHUB_OUTPUT"
+
+      - name: Analyse image layers
+        env:
+          DIVE_IMAGE: wagoodman/dive:${{ inputs.dive_version }}
+          DIVE_CONFIG: ${{ inputs.dive_config }}
+          IMAGE_REF: ${{ steps.ref.outputs.ref }}
+        run: |
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v "${PWD}:/repo:ro" -w /repo \
+            "$DIVE_IMAGE" --ci --ci-config "$DIVE_CONFIG" "$IMAGE_REF"
+
+      - name: Lint image
+        env:
+          DOCKLE_IMAGE: goodwithtech/dockle:${{ inputs.dockle_version }}
+          DOCKLE_EXIT_LEVEL: ${{ inputs.dockle_exit_level }}
+          IMAGE_REF: ${{ steps.ref.outputs.ref }}
+        run: |
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v "${PWD}:/repo:ro" -w /repo \
+            "$DOCKLE_IMAGE" \
+            --no-color --exit-code 1 --exit-level "$DOCKLE_EXIT_LEVEL" "$IMAGE_REF"
+
+      # La base Trivy vit sur le disque de la box et sert tous les repos : un run
+      # ne la retélécharge plus, et les deux scans du job la partagent.
+      - name: Resolve Trivy cache directory
+        id: trivy_cache
+        env:
+          CACHE_ROOT: ${{ inputs.trivy_cache_dir }}
+          RUNNER_ENVIRONMENT: ${{ runner.environment }}
+        run: |
+          set -euo pipefail
+          if [ "$RUNNER_ENVIRONMENT" != "self-hosted" ]; then
+            echo "Runner $RUNNER_ENVIRONMENT : cache Trivy jetable, cache GitHub."
+            exit 0
+          fi
+          mkdir -p "$CACHE_ROOT"
+          echo "TRIVY_CACHE_DIR=${CACHE_ROOT}" >> "$GITHUB_ENV"
+          echo "local=true" >> "$GITHUB_OUTPUT"
+
+      - name: Scan image
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ steps.ref.outputs.ref }}
+          format: table
+          vuln-type: os,library
+          severity: ${{ inputs.trivy_severity }}
+          ignore-unfixed: true
+          exit-code: '1'
+          cache: ${{ steps.trivy_cache.outputs.local == 'true' && 'false' || 'true' }}
+
+      - name: Publish image
+        id: publish
+        if: inputs.push
+        uses: docker/build-push-action@v7
+        with:
+          context: ${{ inputs.context }}
+          file: ${{ inputs.dockerfile }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: ${{ steps.cache.outputs.cache_from }}
+          provenance: true
+          sbom: true
+          secrets: |
+            npm_token=${{ secrets.PACKAGES_READ_TOKEN }}
 
       - name: Export image metadata
         id: export
         env:
-          DIGEST: ${{ steps.build.outputs.digest }}
+          DIGEST: ${{ steps.publish.outputs.digest }}
           TAGS: ${{ steps.meta.outputs.tags }}
         run: |
           echo "image=${IMAGE_NAME}" >> "$GITHUB_OUTPUT"
@@ -115,45 +314,34 @@ jobs:
           } > image-metadata.txt
 
       - name: Upload image metadata
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: image-metadata
           path: image-metadata.txt
           if-no-files-found: error
 
-      - name: Scan published image
-        if: inputs.push && steps.build.outputs.digest != ''
-        uses: aquasecurity/trivy-action@v0.36.0
-        with:
-          image-ref: ${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
-          format: table
-          vuln-type: os,library
-          severity: ${{ inputs.trivy_severity }}
-          ignore-unfixed: true
-          exit-code: '1'
-
       - name: Generate image SBOM
-        if: inputs.push && steps.build.outputs.digest != ''
+        if: inputs.push && steps.publish.outputs.digest != ''
         uses: anchore/sbom-action@v0
         with:
-          image: ${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
+          image: ${{ env.IMAGE_NAME }}@${{ steps.publish.outputs.digest }}
           format: spdx-json
           output-file: image-sbom.spdx.json
 
       - name: Upload image SBOM
-        if: inputs.push && steps.build.outputs.digest != ''
-        uses: actions/upload-artifact@v4
+        if: inputs.push && steps.publish.outputs.digest != ''
+        uses: actions/upload-artifact@v7
         with:
           name: image-sbom
           path: image-sbom.spdx.json
           if-no-files-found: error
 
       - name: Install Cosign
-        if: inputs.push && steps.build.outputs.digest != ''
+        if: inputs.push && steps.publish.outputs.digest != ''
         uses: sigstore/cosign-installer@v3
 
       - name: Sign published image
-        if: inputs.push && steps.build.outputs.digest != ''
+        if: inputs.push && steps.publish.outputs.digest != ''
         env:
-          IMAGE_REF: ${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
+          IMAGE_REF: ${{ env.IMAGE_NAME }}@${{ steps.publish.outputs.digest }}
         run: cosign sign --yes "$IMAGE_REF"
