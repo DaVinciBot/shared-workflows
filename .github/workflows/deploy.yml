@@ -3,22 +3,37 @@ name: Shared Deploy
 on:
   workflow_call:
     inputs:
+      runner:
+        description: >-
+          Runner the jobs run on, as a JSON array of labels. Defaults to the self-hosted runner of the
+          organisation in Helsinki; pass another array, such as '["ubuntu-latest"]', for a job that
+          really needs a GitHub-hosted VM.
+        required: false
+        type: string
+        default: '["self-hosted", "helsinki"]'
       environment:
-        description: Target environment name.
+        description: Target environment name (dev, staging, prod).
         required: true
         type: string
-      image_ref:
-        description: Image reference to deploy, preferably an immutable digest.
-        required: true
-        type: string
-      allow_missing_webhook:
-        description: Skip deployment when the webhook secret is absent.
+      image_name:
+        description: Image name without tag. Defaults to ghcr.io/<repo>.
         required: false
-        type: boolean
-        default: false
+        type: string
+        default: ''
+      image_tag:
+        description: Explicit tag to deploy (e.g. sha-<commit> for a rollback). Defaults to the environment mapping (prod -> main, otherwise <environment>).
+        required: false
+        type: string
+        default: ''
+      health_url:
+        description: URL polled after deploy to confirm the app is healthy.
+        required: true
+        type: string
     secrets:
-      webhook_url:
-        required: false
+      WATCHTOWER_URL:
+        required: true
+      WATCHTOWER_TOKEN:
+        required: true
 
 permissions:
   contents: read
@@ -26,47 +41,69 @@ permissions:
 jobs:
   deploy:
     name: Deploy ${{ inputs.environment }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
+    runs-on: ${{ fromJSON(inputs.runner) }}
+    timeout-minutes: 15
     environment: ${{ inputs.environment }}
     steps:
-      - name: Check Dokploy webhook
-        id: webhook
+      - name: Resolve image reference
+        id: image
         env:
-          WEBHOOK_URL: ${{ secrets.webhook_url }}
-          ALLOW_MISSING_WEBHOOK: ${{ inputs.allow_missing_webhook }}
+          IMAGE_NAME: ${{ inputs.image_name }}
+          IMAGE_TAG: ${{ inputs.image_tag }}
+          REPOSITORY: ${{ github.repository }}
+          ENVIRONMENT: ${{ inputs.environment }}
         run: |
-          if [ -z "$WEBHOOK_URL" ]; then
-            if [ "$ALLOW_MISSING_WEBHOOK" = "true" ]; then
-              echo "::notice::Dokploy webhook is not configured; skipping deployment."
-              echo "enabled=false" >> "$GITHUB_OUTPUT"
-              exit 0
-            fi
+          name="${IMAGE_NAME:-ghcr.io/${REPOSITORY}}"
+          name="${name,,}"
 
-            echo "::error::Dokploy webhook secret is not configured."
-            exit 1
+          tag="$IMAGE_TAG"
+          if [ -z "$tag" ]; then
+            case "$ENVIRONMENT" in
+              prod) tag="main" ;;
+              *) tag="$ENVIRONMENT" ;;
+            esac
           fi
 
-          echo "enabled=true" >> "$GITHUB_OUTPUT"
+          echo "ref=${name}:${tag}" >> "$GITHUB_OUTPUT"
+          echo "Triggering update for: ${name}:${tag}"
 
-      - name: Trigger Dokploy deploy
-        if: steps.webhook.outputs.enabled == 'true'
+      - name: Trigger Watchtower update
         env:
-          WEBHOOK_URL: ${{ secrets.webhook_url }}
-          TARGET_ENVIRONMENT: ${{ inputs.environment }}
-          IMAGE_REF: ${{ inputs.image_ref }}
-          REPOSITORY: ${{ github.repository }}
-          SHA: ${{ github.sha }}
+          WATCHTOWER_URL: ${{ secrets.WATCHTOWER_URL }}
+          WATCHTOWER_TOKEN: ${{ secrets.WATCHTOWER_TOKEN }}
+          IMAGE_REF: ${{ steps.image.outputs.ref }}
         run: |
-          payload="$(jq -n \
-            --arg environment "$TARGET_ENVIRONMENT" \
-            --arg image_ref "$IMAGE_REF" \
-            --arg repository "$REPOSITORY" \
-            --arg sha "$SHA" \
-            '{environment: $environment, image_ref: $image_ref, repository: $repository, sha: $sha}')"
+          response="$(curl -fsS -X POST -G \
+            --retry 3 --retry-delay 5 --max-time 300 \
+            -H "Authorization: Bearer $WATCHTOWER_TOKEN" \
+            --data-urlencode "image=$IMAGE_REF" \
+            "$WATCHTOWER_URL/v1/update")"
+          echo "$response" | jq .
 
-          curl -fsS \
-            -X POST \
-            -H "Content-Type: application/json" \
-            -d "$payload" \
-            "$WEBHOOK_URL"
+          failed="$(echo "$response" | jq -r '.summary.failed // 0')"
+          updated="$(echo "$response" | jq -r '.summary.updated // 0')"
+
+          if [ "$failed" != "0" ]; then
+            echo "::error::Watchtower reported $failed failed update(s)."
+            exit 1
+          fi
+          if [ "$updated" = "0" ]; then
+            echo "::warning::No container was updated (image already current, or no container matches $IMAGE_REF — check the watchtower label and the image tag in the compose file)."
+          fi
+
+      - name: Wait for health check
+        env:
+          HEALTH_URL: ${{ inputs.health_url }}
+        run: |
+          sleep 5
+          for attempt in $(seq 1 30); do
+            status="$(curl -s -o /dev/null -w '%{http_code}' "$HEALTH_URL" || echo 000)"
+            if [ "$status" = "200" ]; then
+              echo "Healthy after $attempt attempt(s)."
+              exit 0
+            fi
+            echo "Attempt $attempt/30: $HEALTH_URL returned $status, retrying in 10s..."
+            sleep 10
+          done
+          echo "::error::$HEALTH_URL did not return 200 within 5 minutes."
+          exit 1

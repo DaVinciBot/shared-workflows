@@ -1,4 +1,4 @@
-name: Shared CI
+name: Shared Release (changesets)
 
 on:
   workflow_call:
@@ -21,55 +21,43 @@ on:
         required: false
         type: string
         default: .nvmrc
-      working_directory:
-        description: >-
-          Directory in which the quality-gate commands run. Dependencies are
-          always installed from the repository root so pnpm workspaces link
-          correctly; only the commands run here. Defaults to the repo root.
-        required: false
-        type: string
-        default: '.'
       pnpm_store_dir:
         description: >-
           Persistent pnpm store on the self-hosted runner, shared by every repository — the store is
           content-addressed, so sharing it is what it is for. Ignored on a GitHub-hosted runner, where the
-          store dies with the VM and setup-node caches it through GitHub instead.
+          store dies with the VM.
         required: false
         type: string
         default: /home/gha-runner/pnpm-store
-      install_filter:
-        description: >-
-          pnpm filter limiting the install to one workspace package and its workspace dependencies
-          (a trailing '...' is appended). Empty installs the whole workspace.
+      version_script:
+        description: Command run by changesets to apply the changesets and bump versions.
         required: false
         type: string
-        default: ''
-      commands:
-        description: >-
-          JSON array of {name, command} objects to run as the quality-gate
-          matrix. Use it to run only the scripts a given package actually
-          defines. When empty, the default gates (check, lint, test:unit,
-          build) run at the repository root.
+        default: pnpm changeset version
+      pr_title:
+        description: Title of the version PR.
         required: false
         type: string
-        default: ''
+        default: 'chore: version packages'
+      commit_message:
+        description: Commit message used on the version PR.
+        required: false
+        type: string
+        default: 'chore: version packages'
     secrets:
       PACKAGES_READ_TOKEN:
-        description: Token with read:packages used to install private @davincibot packages.
+        description: Token with read:packages, needed only to install private @davincibot dependencies from other repos.
         required: false
 
 permissions:
-  contents: read
+  contents: write
+  pull-requests: write
 
 jobs:
-  quality-gates:
-    name: ${{ matrix.name }}
+  version:
+    name: Version Packages PR
     runs-on: ${{ fromJSON(inputs.runner) }}
-    timeout-minutes: 20
-    strategy:
-      fail-fast: false
-      matrix:
-        include: ${{ fromJSON(inputs.commands != '' && inputs.commands || '[{"name":"Typecheck","command":"pnpm check"},{"name":"Lint","command":"pnpm lint"},{"name":"Unit Tests","command":"pnpm test:unit"},{"name":"Build","command":"pnpm build"}]') }}
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
 
@@ -81,11 +69,9 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version-file: ${{ inputs.node_version_file }}
-          cache: ${{ runner.environment == 'self-hosted' && '' || 'pnpm' }}
 
-      # Le store pnpm survit aux jobs sur la box : le cache réseau de GitHub ferait
-      # un aller-retour de tarball par run pour un contenu déjà sur le disque. On le
-      # laisse donc à setup-node uniquement quand le runner est jetable.
+      # Le store pnpm survit aux jobs sur la box : le garder à demeure évite de
+      # retélécharger le workspace à chaque « Version Packages ».
       - name: Resolve pnpm store
         id: store
         env:
@@ -94,28 +80,29 @@ jobs:
         run: |
           set -euo pipefail
           if [ "$RUNNER_ENVIRONMENT" != "self-hosted" ]; then
-            echo "Runner $RUNNER_ENVIRONMENT : store jetable, cache GitHub."
+            echo "Runner $RUNNER_ENVIRONMENT : store jetable."
             exit 0
           fi
           mkdir -p "$STORE_ROOT"
           echo "dir=${STORE_ROOT}" >> "$GITHUB_OUTPUT"
 
+      # `changeset version` ne fait que réécrire des package.json et des CHANGELOG :
+      # aucun script de cycle de vie n'est nécessaire pour ça.
       - name: Install dependencies
         env:
           NPM_TOKEN: ${{ secrets.PACKAGES_READ_TOKEN }}
           STORE_DIR: ${{ steps.store.outputs.dir }}
-          INSTALL_FILTER: ${{ inputs.install_filter }}
         run: |
           set -euo pipefail
-          args=(install --frozen-lockfile)
+          args=(install --frozen-lockfile --ignore-scripts)
           if [ -n "${STORE_DIR:-}" ]; then
             args+=(--store-dir "$STORE_DIR")
           fi
-          if [ -n "${INSTALL_FILTER:-}" ]; then
-            args+=(--filter "${INSTALL_FILTER}...")
-          fi
           pnpm "${args[@]}"
 
-      - name: Run ${{ matrix.name }}
-        run: ${{ matrix.command }}
-        working-directory: ${{ inputs.working_directory }}
+      - uses: changesets/action@v2
+        with:
+          version-script: ${{ inputs.version_script }}
+          pr-title: ${{ inputs.pr_title }}
+          commit-message: ${{ inputs.commit_message }}
+          github-token: ${{ github.token }}
